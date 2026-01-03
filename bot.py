@@ -7,7 +7,8 @@ from datetime import datetime
 # =========================
 
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_USERNAME = "@quinte_ia"
+CHANNEL_USERNAME = -1003505856903
+
 
 # =========================
 # RÉCUPÉRATION DES DONNÉES

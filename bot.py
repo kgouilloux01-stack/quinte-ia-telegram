@@ -1,6 +1,5 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
 import random
 
 # =========================
@@ -17,21 +16,15 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # 🔹 Hippodrome
-    try:
-        hippodrome_tag = soup.select_one(".meeting-name")
-        hippodrome = hippodrome_tag.text.strip() if hippodrome_tag else "Hippodrome inconnu"
-    except:
-        hippodrome = "Hippodrome inconnu"
+    # Hippodrome et date simplifiés pour rester comme tu veux
+    hippodrome = "Allocation: 90000€"
+    date_course = "Distance: 2100 mètres"
 
-    # 🔹 Date
-    date_course = datetime.now().strftime("%d/%m/%Y")
-
-    # 🔹 Chevaux et numéros
+    # Chevaux et numéros
     horses = []
     try:
         table = soup.find("table", {"class": "table"})
-        rows = table.find_all("tr")[1:]
+        rows = table.find_all("tr")[1:]  # on skip l’entête
         for row in rows:
             cols = row.find_all("td")
             if len(cols) >= 2:
@@ -43,7 +36,7 @@ def get_quinte_info():
                 name = f"Cheval {num}"
                 horses.append({"num": num, "name": name})
     except:
-        horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 16)]
+        horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
     return hippodrome, date_course, horses
 
@@ -60,7 +53,7 @@ def compute_scores(horses):
 # =========================
 def generate_message(hippodrome, date_course, sorted_horses):
     top5 = sorted_horses[:5]
-    texte = f"🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
+    texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
     texte += f"📍 Hippodrome : {hippodrome}\n"
     texte += f"📅 Date : {date_course}\n\n"
     texte += "👉 Top 5 IA :\n"

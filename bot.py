@@ -6,7 +6,7 @@ import random
 # CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # ton groupe / canal Telegram
+CHANNEL_ID = -1003505856903  # ton canal ou groupe Telegram
 
 # =========================
 # RÉCUPÉRATION DES INFOS DE COURSE
@@ -16,34 +16,30 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # Hippodrome + Allocation + Distance
+    # ===== Hippodrome, date, allocation, distance =====
     try:
-        info_tag = soup.select_one(".meeting-info")  # classe exacte à ajuster si besoin
-        if info_tag:
-            hippodrome = info_tag.text.strip()  # exemple : "Vincennes - Allocation: 90000€ - Distance: 2100m"
-            # on peut couper si on veut juste Allocation et Distance
-            parts = hippodrome.split(" - ")
-            if len(parts) >= 3:
-                hippodrome = parts[0]
-                allocation = parts[1]
-                distance = parts[2]
-            else:
-                allocation = "Allocation inconnue"
-                distance = "Distance inconnue"
-        else:
-            hippodrome = "Hippodrome inconnu"
-            allocation = "Allocation inconnue"
-            distance = "Distance inconnue"
+        # Ligne avec l'heure et l'hippodrome
+        course_line = soup.find("div", class_="course-infos").get_text(strip=True)
+        # exemple: "Départ à 15h15 - Vincennes - 04/01/2026"
+        parts = course_line.split(" - ")
+        hippodrome = parts[1] if len(parts) > 1 else "Hippodrome inconnu"
+
+        # Ligne avec allocation et distance
+        attele_line = soup.find("div", class_="meeting-info").get_text(strip=True)
+        # exemple: "Attelé - Allocation: 90000€ - Distance: 2100 mètres - 16 Partants"
+        attele_parts = attele_line.split(" - ")
+        allocation = attele_parts[1] if len(attele_parts) > 1 else "Allocation inconnue"
+        distance = attele_parts[2] if len(attele_parts) > 2 else "Distance inconnue"
     except:
         hippodrome = "Hippodrome inconnu"
         allocation = "Allocation inconnue"
         distance = "Distance inconnue"
 
-    # Chevaux et numéros
+    # ===== Chevaux et numéros =====
     horses = []
     try:
         table = soup.find("table", {"class": "table"})
-        rows = table.find_all("tr")[1:]  # on skip l’entête
+        rows = table.find_all("tr")[1:]  # skip header
         for row in rows:
             cols = row.find_all("td")
             if len(cols) >= 2:

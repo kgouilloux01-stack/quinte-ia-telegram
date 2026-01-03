@@ -100,4 +100,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-send_telegram("✅ TEST OK – le bot peut envoyer des messages")

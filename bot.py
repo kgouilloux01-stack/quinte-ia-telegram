@@ -8,6 +8,13 @@ import random
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # ton canal Telegram
 
+# Liste des hippodromes possibles pour identification fiable
+HIPPODROMES_POSSIBLES = [
+    "Vincennes", "Enghien", "Cagnes-sur-Mer", "Lyon-La Soie",
+    "Marseille Borely", "Caen", "Amiens", "Saint-Cloud",
+    "Longchamp", "Chantilly", "Deauville", "Maisons-Laffitte"
+]
+
 # =========================
 # RÉCUPÉRATION DES INFOS DE COURSE
 # =========================
@@ -16,7 +23,6 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # ===== Hippodrome, allocation et distance =====
     hippodrome = "Hippodrome inconnu"
     allocation = "Allocation inconnue"
     distance = "Distance inconnue"
@@ -30,7 +36,8 @@ def get_quinte_info():
                 parts = t.split(" - ")
                 allocation = next((p for p in parts if "Allocation" in p), "Allocation inconnue")
                 distance = next((p for p in parts if "Distance" in p), "Distance inconnue")
-                hippodrome = parts[-1].strip()  # dernier élément = vrai hippodrome
+                # cherche l’hippodrome dans la ligne
+                hippodrome = next((h for h in HIPPODROMES_POSSIBLES if h in t), "Hippodrome inconnu")
                 break
     except:
         pass

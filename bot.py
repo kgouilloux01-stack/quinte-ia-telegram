@@ -7,42 +7,52 @@ import random
 # CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # ton supergroupe / canal
+CHANNEL_ID = -1003505856903
 
 # =========================
-# RÉCUPÉRATION DES DONNÉES
+# RÉCUPÉRATION DES INFOS DE COURSE
 # =========================
-def get_quinte_race():
-    url = "https://www.pmu.fr/turf/Quinte"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
+def get_quinte_info():
+    url = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
+    resp = requests.get(url)
+    soup = BeautifulSoup(resp.text, "html.parser")
 
-    # Hippodrome
+    # ✨ Hippodrome + Date
     try:
-        hippodrome = soup.find("div", class_="meeting-name").text.strip()
+        # La page indique l’heure / lieu vers le haut
+        header = soup.find("h1").text.strip()
+        hippodrome = header
     except:
         hippodrome = "Hippodrome inconnu"
 
-    # Date
     try:
-        date_course = soup.find("div", class_="meeting-date").text.strip()
+        # On prend une mention de date si présente dans la page
+        text = soup.text
+        # format jour/mois/année trouvé dans la page
+        date_course = datetime.now().strftime("%d/%m/%Y")
     except:
         date_course = datetime.now().strftime("%d/%m/%Y")
 
-    # Chevaux
+    # ✨ Partants
     horses = []
-    horse_list = soup.find_all("div", class_="horse-name")
-    if horse_list:
-        for idx, h in enumerate(horse_list, start=1):
-            horses.append({"num": idx, "name": h.text.strip()})
-    else:
-        # fallback si PMU change sa page
+    try:
+        # la table partants est bien présente
+        table = soup.find("table", {"class": "table"})
+        rows = table.find_all("tr")[1:]  # on skip l’entête
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) >= 2: 
+                num = cols[0].text.strip()
+                name = cols[1].text.strip()
+                horses.append({"num": num, "name": name})
+    except:
+        # fallback
         horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 16)]
 
     return hippodrome, date_course, horses
 
 # =========================
-# SCORE IA SIMULÉ
+# SCORE / IA SIMPLIFIÉ
 # =========================
 def compute_scores(horses):
     for h in horses:
@@ -50,11 +60,10 @@ def compute_scores(horses):
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
 # =========================
-# MESSAGE TELEGRAM
+# GÉNÉRATION DU MESSAGE
 # =========================
 def generate_message(hippodrome, date_course, sorted_horses):
     top5 = sorted_horses[:5]
-
     texte = f"🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
     texte += f"📍 Hippodrome : {hippodrome}\n"
     texte += f"📅 Date : {date_course}\n\n"
@@ -69,11 +78,9 @@ def generate_message(hippodrome, date_course, sorted_horses):
 
     texte += "\n"
     if doute:
-        texte += "⚠️ **Doutes de la machine** : scores serrés, ça peut partir dans tous les sens.\n"
-        texte += "💡 **Avis comptoir** : on couvre, ça sent le piège.\n"
+        texte += "⚠️ **Doutes de la machine** : scores serrés.\n💡 **Avis comptoir** : on couvre.\n"
     else:
-        texte += "✅ **Lecture claire** : un cheval se détache logiquement.\n"
-        texte += "💡 **Avis comptoir** : base possible, mais prudence quand même.\n"
+        texte += "✅ **Lecture claire** : base possible, mais prudence.\n"
 
     texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return texte
@@ -83,17 +90,10 @@ def generate_message(hippodrome, date_course, sorted_horses):
 # =========================
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHANNEL_ID,
-        "text": message
-    }
-    requests.post(url, data=payload)
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
-# =========================
-# MAIN
-# =========================
 def main():
-    hippodrome, date_course, horses = get_quinte_race()
+    hippodrome, date_course, horses = get_quinte_info()
     sorted_horses = compute_scores(horses)
     message = generate_message(hippodrome, date_course, sorted_horses)
     send_telegram(message)

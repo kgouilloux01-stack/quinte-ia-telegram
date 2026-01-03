@@ -134,14 +134,13 @@ def main():
         except:
             dep = now + timedelta(minutes=10)
 
-        # Vérifie si la course commence dans 8 minutes
         wait_seconds = (dep - timedelta(minutes=8) - now).total_seconds()
-        print(f"DEBUG: Course {course_info['hippodrome']} à {course_info['heure_depart']} dans {wait_seconds:.1f}s")  # debug
-        message = generate_message(course_info, top3)
-send_telegram(message)
-print(f"✅ Pronostic envoyé pour {course_info['hippodrome']} à {course_info['heure_depart']}")
+        print(f"DEBUG: Course {course_info['hippodrome']} à {course_info['heure_depart']} dans {wait_seconds:.1f}s")
 
-            print(f"✅ Pronostic envoyé pour {course_info['hippodrome']} à {course_info['heure_depart']}")
+        # ⚠️ TEST immédiat : envoie tous les pronostics
+        message = generate_message(course_info, top3)
+        send_telegram(message)
+        print(f"✅ Pronostic envoyé pour {course_info['hippodrome']} à {course_info['heure_depart']}")
 
 if __name__ == "__main__":
     main()

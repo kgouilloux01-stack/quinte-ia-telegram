@@ -18,7 +18,7 @@ def send_telegram(message):
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
 # =========================
-# COURSES DU JOUR
+# LISTE DE TOUTES LES COURSES DU JOUR
 # =========================
 def get_courses():
     resp = requests.get(SITE_URL)
@@ -26,7 +26,7 @@ def get_courses():
     courses = []
     for a in soup.select("div#bare-course a"):
         href = a.get("href")
-        if href:
+        if href and "/programmes-courses/" in href:
             courses.append("https://www.coin-turf.fr" + href)
     return courses
 
@@ -123,7 +123,7 @@ def generate_message(course_info, top_horses):
 # =========================
 def main():
     courses = get_courses()
-    now = datetime.utcnow() + timedelta(hours=1)  # conversion UTC -> FR
+    now = datetime.utcnow() + timedelta(hours=1)  # heure FR
     for course_url in courses:
         course_info = get_course_info(course_url)
         sorted_horses = compute_scores(course_info["horses"])
@@ -134,13 +134,12 @@ def main():
         except:
             dep = now + timedelta(minutes=10)
 
+        # ⚠️ Filtrage : seulement 8 minutes avant départ
         wait_seconds = (dep - timedelta(minutes=8) - now).total_seconds()
-        print(f"DEBUG: Course {course_info['hippodrome']} à {course_info['heure_depart']} dans {wait_seconds:.1f}s")
-
-        # ⚠️ TEST immédiat : envoie tous les pronostics
-        message = generate_message(course_info, top3)
-        send_telegram(message)
-        print(f"✅ Pronostic envoyé pour {course_info['hippodrome']} à {course_info['heure_depart']}")
+        if wait_seconds <= 0:
+            message = generate_message(course_info, top3)
+            send_telegram(message)
+            print(f"✅ Pronostic envoyé pour {course_info['hippodrome']} à {course_info['heure_depart']}")
 
 if __name__ == "__main__":
     main()

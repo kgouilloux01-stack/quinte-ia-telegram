@@ -16,9 +16,28 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # Hippodrome et date simplifiés pour rester comme tu veux
-    hippodrome = "Allocation: 90000€"
-    date_course = "Distance: 2100 mètres"
+    # Hippodrome + Allocation + Distance
+    try:
+        info_tag = soup.select_one(".meeting-info")  # classe exacte à ajuster si besoin
+        if info_tag:
+            hippodrome = info_tag.text.strip()  # exemple : "Vincennes - Allocation: 90000€ - Distance: 2100m"
+            # on peut couper si on veut juste Allocation et Distance
+            parts = hippodrome.split(" - ")
+            if len(parts) >= 3:
+                hippodrome = parts[0]
+                allocation = parts[1]
+                distance = parts[2]
+            else:
+                allocation = "Allocation inconnue"
+                distance = "Distance inconnue"
+        else:
+            hippodrome = "Hippodrome inconnu"
+            allocation = "Allocation inconnue"
+            distance = "Distance inconnue"
+    except:
+        hippodrome = "Hippodrome inconnu"
+        allocation = "Allocation inconnue"
+        distance = "Distance inconnue"
 
     # Chevaux et numéros
     horses = []
@@ -38,7 +57,7 @@ def get_quinte_info():
     except:
         horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
-    return hippodrome, date_course, horses
+    return hippodrome, allocation, distance, horses
 
 # =========================
 # CALCUL SCORE IA SIMPLIFIÉ
@@ -51,11 +70,12 @@ def compute_scores(horses):
 # =========================
 # GÉNÉRATION DU MESSAGE
 # =========================
-def generate_message(hippodrome, date_course, sorted_horses):
+def generate_message(hippodrome, allocation, distance, sorted_horses):
     top5 = sorted_horses[:5]
     texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
     texte += f"📍 Hippodrome : {hippodrome}\n"
-    texte += f"📅 Date : {date_course}\n\n"
+    texte += f"💰 {allocation}\n"
+    texte += f"📏 {distance}\n\n"
     texte += "👉 Top 5 IA :\n"
 
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
@@ -85,9 +105,9 @@ def send_telegram(message):
 # MAIN
 # =========================
 def main():
-    hippodrome, date_course, horses = get_quinte_info()
+    hippodrome, allocation, distance, horses = get_quinte_info()
     sorted_horses = compute_scores(horses)
-    message = generate_message(hippodrome, date_course, sorted_horses)
+    message = generate_message(hippodrome, allocation, distance, sorted_horses)
     send_telegram(message)
 
 if __name__ == "__main__":

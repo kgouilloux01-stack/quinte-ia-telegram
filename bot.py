@@ -22,19 +22,15 @@ def get_quinte_info():
     distance = "Distance inconnue"
 
     try:
-        # on cherche le premier texte contenant "Allocation"
+        # on cherche le premier texte contenant "Allocation" et "Distance"
         all_texts = soup.find_all(text=True)
         for t in all_texts:
             if "Allocation" in t and "Distance" in t:
                 # exemple: "Attelé - Allocation: 90000€ - Distance: 2100 mètres - 16 Partants - Vincennes"
                 parts = t.split(" - ")
-                for part in parts:
-                    if "Allocation" in part:
-                        allocation = part.strip()
-                    elif "Distance" in part:
-                        distance = part.strip()
-                    elif part.strip() and not any(x in part for x in ["Attelé","Allocation","Distance","Partants"]):
-                        hippodrome = part.strip()
+                allocation = next((p for p in parts if "Allocation" in p), "Allocation inconnue")
+                distance = next((p for p in parts if "Distance" in p), "Distance inconnue")
+                hippodrome = parts[-1].strip()  # dernier élément = vrai hippodrome
                 break
     except:
         pass

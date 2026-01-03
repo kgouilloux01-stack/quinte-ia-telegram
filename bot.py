@@ -1,5 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
 import random
 
 # =========================
@@ -7,29 +8,48 @@ import random
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # ton canal Telegram
+SITE_URL = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
 
 # =========================
-# RÉCUPÉRATION DES INFOS DE COURSE
+# ENVOI TELEGRAM
 # =========================
-def get_quinte_info():
-    url = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
+
+# =========================
+# COURSES DU JOUR
+# =========================
+def get_courses():
+    resp = requests.get(SITE_URL)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    courses = []
+    for a in soup.select("div#bare-course a"):
+        href = a.get("href")
+        if href:
+            courses.append("https://www.coin-turf.fr" + href)
+    return courses
+
+# =========================
+# INFO COURSE
+# =========================
+def get_course_info(url):
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # ===== Hippodrome et date =====
+    # Hippodrome, heure et date
+    depart_div = soup.find("div", {"class": "DepartQ"})
     hippodrome = "Hippodrome inconnu"
-    date_course = "Date inconnue"
-    try:
-        depart_div = soup.find("div", {"class": "DepartQ"})
-        if depart_div:
-            parts = [p.strip() for p in depart_div.text.split("-")]
-            if len(parts) >= 3:
-                hippodrome = parts[1].strip()  # Vincennes
-                date_course = parts[2].strip() # 04/01/2026
-    except:
-        pass
+    heure_depart = "00:00"
+    date_course = datetime.now().strftime("%d/%m/%Y")
+    if depart_div:
+        parts = [p.strip() for p in depart_div.text.split("-")]
+        if len(parts) >= 3:
+            heure_depart = parts[0].replace("Depart à", "").strip()
+            hippodrome = parts[1].strip()
+            date_course = parts[2].strip()
 
-    # ===== Allocation et distance =====
+    # Allocation et distance
     allocation = "Allocation inconnue"
     distance = "Distance inconnue"
     try:
@@ -44,7 +64,7 @@ def get_quinte_info():
     except:
         pass
 
-    # ===== Chevaux et numéros =====
+    # Chevaux
     horses = []
     try:
         table = soup.find("table", {"class": "table"})
@@ -55,17 +75,20 @@ def get_quinte_info():
                 num = cols[0].text.strip()
                 name = cols[1].text.strip()
                 horses.append({"num": num, "name": name})
-            else:
-                num = cols[0].text.strip()
-                name = f"Cheval {num}"
-                horses.append({"num": num, "name": name})
     except:
         horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
-    return hippodrome, date_course, allocation, distance, horses
+    return {
+        "hippodrome": hippodrome,
+        "heure_depart": heure_depart,
+        "date_course": date_course,
+        "allocation": allocation,
+        "distance": distance,
+        "horses": horses
+    }
 
 # =========================
-# CALCUL SCORE IA SIMPLIFIÉ
+# SCORE IA
 # =========================
 def compute_scores(horses):
     for h in horses:
@@ -73,48 +96,50 @@ def compute_scores(horses):
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
 # =========================
-# GÉNÉRATION DU MESSAGE
+# GENERATION MESSAGE
 # =========================
-def generate_message(hippodrome, date_course, allocation, distance, sorted_horses):
-    top5 = sorted_horses[:5]
-    texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
-    texte += f"📍 Hippodrome : {hippodrome}\n"
-    texte += f"📅 Date : {date_course}\n"
-    texte += f"💰 {allocation}\n"
-    texte += f"📏 {distance}\n\n"
-    texte += "👉 Top 5 IA :\n"
-
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-    for m, h in zip(medals, top5):
+def generate_message(course_info, top_horses):
+    texte = "🤖 **LECTURE MACHINE – PRONOSTIC QUINTÉ**\n\n"
+    texte += f"📍 Hippodrome : {course_info['hippodrome']}\n"
+    texte += f"🕒 Départ : {course_info['heure_depart']}\n"
+    texte += f"💰 {course_info['allocation']}\n"
+    texte += f"📏 {course_info['distance']}\n\n"
+    texte += "👉 Top 3 IA :\n"
+    medals = ["🥇", "🥈", "🥉"]
+    for m, h in zip(medals, top_horses):
         texte += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
-
-    scores = [h["score"] for h in top5]
+    scores = [h["score"] for h in top_horses]
     doute = max(scores) - min(scores) < 5
-
     texte += "\n"
     if doute:
         texte += "⚠️ **Doutes de la machine** : scores serrés.\n💡 **Avis comptoir** : on couvre.\n"
     else:
-        texte += "✅ **Lecture claire** : base possible, mais prudence.\n"
-
+        texte += "✅ Lecture claire : base possible, mais prudence.\n"
     texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return texte
-
-# =========================
-# ENVOI TELEGRAM
-# =========================
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
 # =========================
 # MAIN
 # =========================
 def main():
-    hippodrome, date_course, allocation, distance, horses = get_quinte_info()
-    sorted_horses = compute_scores(horses)
-    message = generate_message(hippodrome, date_course, allocation, distance, sorted_horses)
-    send_telegram(message)
+    courses = get_courses()
+    now = datetime.now()
+    for course_url in courses:
+        course_info = get_course_info(course_url)
+        sorted_horses = compute_scores(course_info["horses"])
+        top3 = sorted_horses[:3]
+
+        try:
+            dep = datetime.strptime(f"{course_info['date_course']} {course_info['heure_depart']}", "%d/%m/%Y %H:%M")
+        except:
+            dep = now + timedelta(minutes=10)
+
+        # Vérifie si la course commence dans 8 minutes
+        wait_seconds = (dep - timedelta(minutes=8) - now).total_seconds()
+        if 0 <= wait_seconds <= 60:  # course imminente
+            message = generate_message(course_info, top3)
+            send_telegram(message)
+            print(f"✅ Pronostic envoyé pour {course_info['hippodrome']} à {course_info['heure_depart']}")
 
 if __name__ == "__main__":
     main()

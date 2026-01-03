@@ -1,8 +1,9 @@
-name: Telegram Multi-Courses Quinté
+name: Telegram Pronostic Bot
 
+# ⚡ Vérifie toutes les minutes
 on:
   schedule:
-    - cron: '* * * * *'   # toutes les minutes
+    - cron: '* * * * *'  # toutes les minutes
   workflow_dispatch:
 
 jobs:

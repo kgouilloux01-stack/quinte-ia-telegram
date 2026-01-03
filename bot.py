@@ -6,7 +6,7 @@ import random
 # CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # ton canal ou groupe Telegram
+CHANNEL_ID = -1003505856903  # ton canal Telegram
 
 # =========================
 # RÉCUPÉRATION DES INFOS DE COURSE
@@ -16,24 +16,28 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # ===== Hippodrome, date, allocation, distance =====
-    try:
-        # Ligne avec l'heure et l'hippodrome
-        course_line = soup.find("div", class_="course-infos").get_text(strip=True)
-        # exemple: "Départ à 15h15 - Vincennes - 04/01/2026"
-        parts = course_line.split(" - ")
-        hippodrome = parts[1] if len(parts) > 1 else "Hippodrome inconnu"
+    # ===== Hippodrome, allocation et distance =====
+    hippodrome = "Hippodrome inconnu"
+    allocation = "Allocation inconnue"
+    distance = "Distance inconnue"
 
-        # Ligne avec allocation et distance
-        attele_line = soup.find("div", class_="meeting-info").get_text(strip=True)
-        # exemple: "Attelé - Allocation: 90000€ - Distance: 2100 mètres - 16 Partants"
-        attele_parts = attele_line.split(" - ")
-        allocation = attele_parts[1] if len(attele_parts) > 1 else "Allocation inconnue"
-        distance = attele_parts[2] if len(attele_parts) > 2 else "Distance inconnue"
+    try:
+        # on cherche le premier texte contenant "Allocation"
+        all_texts = soup.find_all(text=True)
+        for t in all_texts:
+            if "Allocation" in t and "Distance" in t:
+                # exemple: "Attelé - Allocation: 90000€ - Distance: 2100 mètres - 16 Partants - Vincennes"
+                parts = t.split(" - ")
+                for part in parts:
+                    if "Allocation" in part:
+                        allocation = part.strip()
+                    elif "Distance" in part:
+                        distance = part.strip()
+                    elif part.strip() and not any(x in part for x in ["Attelé","Allocation","Distance","Partants"]):
+                        hippodrome = part.strip()
+                break
     except:
-        hippodrome = "Hippodrome inconnu"
-        allocation = "Allocation inconnue"
-        distance = "Distance inconnue"
+        pass
 
     # ===== Chevaux et numéros =====
     horses = []

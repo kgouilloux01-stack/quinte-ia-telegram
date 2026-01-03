@@ -7,7 +7,7 @@ import random
 # CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903
+CHANNEL_ID = -1003505856903  # ton groupe / canal Telegram
 
 # =========================
 # RÉCUPÉRATION DES INFOS DE COURSE
@@ -17,42 +17,40 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # ✨ Hippodrome + Date
+    # Hippodrome et date
     try:
-        # La page indique l’heure / lieu vers le haut
-        header = soup.find("h1").text.strip()
-        hippodrome = header
+        # Le texte se trouve juste après le <h1>
+        header_text = soup.find("h1").find_next("p").text.strip()
+        # Exemple format : "Départ à 15h15 - Vincennes - 03/01/2026"
+        parts = header_text.split(" - ")
+        if len(parts) >= 3:
+            hippodrome = parts[1].strip()
+            date_course = parts[2].strip()
+        else:
+            hippodrome = "Hippodrome inconnu"
+            date_course = datetime.now().strftime("%d/%m/%Y")
     except:
         hippodrome = "Hippodrome inconnu"
-
-    try:
-        # On prend une mention de date si présente dans la page
-        text = soup.text
-        # format jour/mois/année trouvé dans la page
-        date_course = datetime.now().strftime("%d/%m/%Y")
-    except:
         date_course = datetime.now().strftime("%d/%m/%Y")
 
-    # ✨ Partants
+    # Chevaux
     horses = []
     try:
-        # la table partants est bien présente
         table = soup.find("table", {"class": "table"})
         rows = table.find_all("tr")[1:]  # on skip l’entête
         for row in rows:
             cols = row.find_all("td")
-            if len(cols) >= 2: 
+            if len(cols) >= 2:
                 num = cols[0].text.strip()
                 name = cols[1].text.strip()
                 horses.append({"num": num, "name": name})
     except:
-        # fallback
         horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 16)]
 
     return hippodrome, date_course, horses
 
 # =========================
-# SCORE / IA SIMPLIFIÉ
+# CALCUL SCORE IA SIMPLIFIÉ
 # =========================
 def compute_scores(horses):
     for h in horses:
@@ -92,6 +90,9 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
+# =========================
+# MAIN
+# =========================
 def main():
     hippodrome, date_course, horses = get_quinte_info()
     sorted_horses = compute_scores(horses)

@@ -1,9 +1,10 @@
 name: Telegram Quinté Bot
 
 on:
+  push:
   schedule:
     - cron: '0 7 * * *'
-  workflow_dispatch:
+
 
 jobs:
   run:

@@ -2,7 +2,7 @@ name: Telegram Quinté Bot
 
 on:
   schedule:
-    - cron: '0 7 * * *'   # 9h en France (heure d’été)
+    - cron: '0 7 * * *'   # 9h FR
   workflow_dispatch:
 
 jobs:
@@ -13,13 +13,15 @@ jobs:
       - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: Installation de Python
+      - name: Installation Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Installation des dépendances
-        run: pip install requests
+        run: |
+          pip install requests
+          pip install beautifulsoup4
 
       - name: Lancement du bot
         run: python bot.py

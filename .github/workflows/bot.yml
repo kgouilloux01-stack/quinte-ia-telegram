@@ -1,8 +1,8 @@
-name: Telegram Quinté Bot
+name: Telegram Multi-Courses Quinté
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # 8h FR
+    - cron: '* * * * *'   # toutes les minutes
   workflow_dispatch:
 
 jobs:

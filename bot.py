@@ -8,13 +8,6 @@ import random
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # ton canal Telegram
 
-# Liste des hippodromes possibles pour identification fiable
-HIPPODROMES_POSSIBLES = [
-    "Vincennes", "Enghien", "Cagnes-sur-Mer", "Lyon-La Soie",
-    "Marseille Borely", "Caen", "Amiens", "Saint-Cloud",
-    "Longchamp", "Chantilly", "Deauville", "Maisons-Laffitte"
-]
-
 # =========================
 # RÉCUPÉRATION DES INFOS DE COURSE
 # =========================
@@ -23,22 +16,31 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
+    # ===== Hippodrome et date =====
     hippodrome = "Hippodrome inconnu"
+    date_course = "Date inconnue"
+    try:
+        depart_div = soup.find("div", {"class": "DepartQ"})
+        if depart_div:
+            parts = [p.strip() for p in depart_div.text.split("-")]
+            if len(parts) >= 3:
+                hippodrome = parts[1].strip()  # Vincennes
+                date_course = parts[2].strip() # 04/01/2026
+    except:
+        pass
+
+    # ===== Allocation et distance =====
     allocation = "Allocation inconnue"
     distance = "Distance inconnue"
-
     try:
-        # on cherche le premier texte contenant "Allocation" et "Distance"
-        all_texts = soup.find_all(text=True)
-        for t in all_texts:
-            if "Allocation" in t and "Distance" in t:
-                # exemple: "Attelé - Allocation: 90000€ - Distance: 2100 mètres - 16 Partants - Vincennes"
-                parts = t.split(" - ")
-                allocation = next((p for p in parts if "Allocation" in p), "Allocation inconnue")
-                distance = next((p for p in parts if "Distance" in p), "Distance inconnue")
-                # cherche l’hippodrome dans la ligne
-                hippodrome = next((h for h in HIPPODROMES_POSSIBLES if h in t), "Hippodrome inconnu")
-                break
+        info_p = soup.find("div", {"class": "InfosCourse"}).find("p")
+        if info_p:
+            parts = info_p.text.split(" - ")
+            for p in parts:
+                if "Allocation" in p:
+                    allocation = p.strip()
+                if "Distance" in p:
+                    distance = p.strip()
     except:
         pass
 
@@ -60,7 +62,7 @@ def get_quinte_info():
     except:
         horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
-    return hippodrome, allocation, distance, horses
+    return hippodrome, date_course, allocation, distance, horses
 
 # =========================
 # CALCUL SCORE IA SIMPLIFIÉ
@@ -73,10 +75,11 @@ def compute_scores(horses):
 # =========================
 # GÉNÉRATION DU MESSAGE
 # =========================
-def generate_message(hippodrome, allocation, distance, sorted_horses):
+def generate_message(hippodrome, date_course, allocation, distance, sorted_horses):
     top5 = sorted_horses[:5]
     texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
     texte += f"📍 Hippodrome : {hippodrome}\n"
+    texte += f"📅 Date : {date_course}\n"
     texte += f"💰 {allocation}\n"
     texte += f"📏 {distance}\n\n"
     texte += "👉 Top 5 IA :\n"
@@ -108,9 +111,9 @@ def send_telegram(message):
 # MAIN
 # =========================
 def main():
-    hippodrome, allocation, distance, horses = get_quinte_info()
+    hippodrome, date_course, allocation, distance, horses = get_quinte_info()
     sorted_horses = compute_scores(horses)
-    message = generate_message(hippodrome, allocation, distance, sorted_horses)
+    message = generate_message(hippodrome, date_course, allocation, distance, sorted_horses)
     send_telegram(message)
 
 if __name__ == "__main__":

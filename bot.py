@@ -80,10 +80,12 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHANNEL_USERNAME,
-        "text": message,
-        "parse_mode": "Markdown"
+        "text": message
+        # ⚠️ PAS de parse_mode
     }
-    requests.post(url, data=payload)
+    r = requests.post(url, data=payload)
+    print(r.text)
+
 
 # =========================
 # MAIN

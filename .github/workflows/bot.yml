@@ -1,9 +1,9 @@
-name: Telegram Pronostic Bot
+name: Telegram Quinté Bot
 
-# ⚡ Vérifie toutes les minutes
+# Lancer automatiquement tous les jours à 8h FR
 on:
   schedule:
-    - cron: '* * * * *'  # toutes les minutes
+    - cron: '0 8 * * *'  # tous les jours à 08:00 heure FR
   workflow_dispatch:
 
 jobs:
@@ -11,18 +11,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Récupérer ton code
       - name: Checkout du code
         uses: actions/checkout@v4
 
+      # 2️⃣ Installer Python
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      # 3️⃣ Installer les dépendances
       - name: Installer les dépendances
         run: |
           pip install requests
           pip install beautifulsoup4
 
+      # 4️⃣ Lancer le bot
       - name: Lancer le bot
         run: python bot.py

@@ -123,7 +123,7 @@ def generate_message(course_info, top_horses):
 # =========================
 def main():
     courses = get_courses()
-    now = datetime.now()
+    now = datetime.utcnow() + timedelta(hours=1)  # conversion UTC -> FR
     for course_url in courses:
         course_info = get_course_info(course_url)
         sorted_horses = compute_scores(course_info["horses"])
@@ -136,6 +136,7 @@ def main():
 
         # Vérifie si la course commence dans 8 minutes
         wait_seconds = (dep - timedelta(minutes=8) - now).total_seconds()
+        print(f"DEBUG: Course {course_info['hippodrome']} à {course_info['heure_depart']} dans {wait_seconds:.1f}s")  # debug
         if 0 <= wait_seconds <= 60:  # course imminente
             message = generate_message(course_info, top3)
             send_telegram(message)

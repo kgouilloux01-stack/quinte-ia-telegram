@@ -17,44 +17,71 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # Hippodrome et date
+    # 🔹 Hippodrome exact
     try:
-        # Le texte se trouve juste après le <h1>
-        header_text = soup.find("h1").find_next("p").text.strip()
-        # Exemple format : "Départ à 15h15 - Vincennes - 03/01/2026"
-        parts = header_text.split(" - ")
-        if len(parts) >= 3:
-            hippodrome = parts[1].strip()
-            date_course = parts[2].strip()
+        hippodrome_tag = soup.select_one(".meeting-name")
+        if hippodrome_tag:
+            hippodrome = hippodrome_tag.text.strip()
         else:
             hippodrome = "Hippodrome inconnu"
-            date_course = datetime.now().strftime("%d/%m/%Y")
     except:
         hippodrome = "Hippodrome inconnu"
-        date_course = datetime.now().strftime("%d/%m/%Y")
 
-    # Chevaux
+    # 🔹 Date
+    date_course = datetime.now().strftime("%d/%m/%Y")
+
+    # 🔹 Chevaux, jockeys, entraîneurs et performances
     horses = []
     try:
         table = soup.find("table", {"class": "table"})
         rows = table.find_all("tr")[1:]  # on skip l’entête
         for row in rows:
             cols = row.find_all("td")
-            if len(cols) >= 2:
+            if len(cols) >= 5:
                 num = cols[0].text.strip()
                 name = cols[1].text.strip()
-                horses.append({"num": num, "name": name})
+                jockey = cols[2].text.strip()
+                entraineur = cols[3].text.strip()
+                perf = cols[4].text.strip()
+                horses.append({
+                    "num": num,
+                    "name": name,
+                    "jockey": jockey,
+                    "entraineur": entraineur,
+                    "perf": perf
+                })
+            else:
+                # fallback si moins de colonnes
+                num = cols[0].text.strip()
+                name = cols[1].text.strip()
+                horses.append({
+                    "num": num,
+                    "name": name,
+                    "jockey": "Inconnu",
+                    "entraineur": "Inconnu",
+                    "perf": "-"
+                })
     except:
-        horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 16)]
+        horses = [{"num": i, "name": f"Cheval {i}", "jockey": "Inconnu", "entraineur": "Inconnu", "perf": "-"} for i in range(1, 16)]
 
     return hippodrome, date_course, horses
 
 # =========================
-# CALCUL SCORE IA SIMPLIFIÉ
+# CALCUL SCORE IA (simulé mais réaliste)
 # =========================
 def compute_scores(horses):
     for h in horses:
-        h["score"] = random.randint(70, 90)
+        # Score basé sur performances + randomisation IA
+        base = random.randint(70, 90)
+        perf_bonus = 0
+        try:
+            # Bonus si la performance contient un chiffre récent (ex: "5,3,7")
+            perf_values = [int(s) for s in h["perf"].split(",") if s.isdigit()]
+            if perf_values:
+                perf_bonus = max(0, 5 - min(perf_values))  # meilleur résultat = bonus
+        except:
+            perf_bonus = 0
+        h["score"] = base + perf_bonus
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
 # =========================
@@ -70,6 +97,7 @@ def generate_message(hippodrome, date_course, sorted_horses):
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
     for m, h in zip(medals, top5):
         texte += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
+        texte += f"   🏇 Jockey: {h['jockey']} | 👨‍🏫 Entraîneur: {h['entraineur']} | 📊 Perf: {h['perf']}\n"
 
     scores = [h["score"] for h in top5]
     doute = max(scores) - min(scores) < 5

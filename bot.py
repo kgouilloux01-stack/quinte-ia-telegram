@@ -1,42 +1,56 @@
-import requests
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 import random
 from datetime import datetime, timedelta
 import pytz
+import requests
+import time
 
+# =========================
 # CONFIGURATION
+# =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-COINTURF_PROGRAMMES = "https://www.coin-turf.fr/programmes-courses/"
+COINTURF_URL = "https://www.coin-turf.fr/programmes-courses/"
 
-# SCRAPER PROGRAMME
-def get_coin_turf_courses():
-    resp = requests.get(COINTURF_PROGRAMMES)
-    soup = BeautifulSoup(resp.text, "html.parser")
+# =========================
+# FONCTIONS SELENIUM
+# =========================
+def get_courses_selenium():
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    driver = webdriver.Chrome(options=options)
+    driver.get(COINTURF_URL)
 
     courses = []
-    text = soup.get_text(separator="\n")
 
-    for line in text.split("\n"):
-        l = line.strip()
-        if not l:
+    # Attendre un peu pour que le JS charge
+    time.sleep(5)
+
+    # Coin-Turf affiche chaque course dans des divs avec class "courseRow" (à adapter selon le site)
+    rows = driver.find_elements(By.CSS_SELECTOR, ".courseRow")
+    for r in rows:
+        try:
+            code = r.find_element(By.CSS_SELECTOR, ".courseNum").text.strip()
+            name = r.find_element(By.CSS_SELECTOR, ".courseName").text.strip()
+            heure = r.find_element(By.CSS_SELECTOR, ".courseHour").text.strip()
+            courses.append({
+                "description": f"{code} {name}",
+                "heure": heure
+            })
+        except:
             continue
 
-        if l.startswith("C") and "|" in l:
-            parts = [p.strip() for p in l.split("|")]
-            if len(parts) >= 3:
-                code = parts[0]
-                name = parts[1]
-                time_text = parts[2]
-                heure = time_text.replace("h", ":")
-                if ":" in heure:
-                    courses.append({
-                        "heure": heure,
-                        "description": f"{code} {name}"
-                    })
+    driver.quit()
     return courses
 
+# =========================
 # PRONOSTIC IA
+# =========================
 def compute_scores(n=16):
     horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, n+1)]
     for h in horses:
@@ -44,8 +58,8 @@ def compute_scores(n=16):
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
 def generate_prono_message(course):
-    texte = f"PRONOSTIC IA – {course['description']}\n"
-    texte += f"Heure : {course['heure']}\n\nTop 5 IA :\n"
+    texte = f"🤖 PRONOSTIC IA – {course['description']}\n"
+    texte += f"⏱ Heure : {course['heure']}\n\nTop 5 IA :\n"
     sorted_horses = compute_scores()
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
     for m, h in zip(medals, sorted_horses[:5]):
@@ -56,30 +70,35 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
-# MAIN – ENVOI 10 MIN AVANT
+# =========================
+# MAIN - 10 MINUTES AVANT
+# =========================
 def main():
-    now_utc = datetime.now(pytz.utc)
     france_tz = pytz.timezone("Europe/Paris")
+    now_utc = datetime.now(pytz.utc)
 
-    courses = get_coin_turf_courses()
+    courses = get_courses_selenium()
     if not courses:
         print("Aucune course trouvée !")
         return
 
+    sent_courses = set()  # pour éviter les doublons
+
     for course in courses:
         try:
             dt = datetime.strptime(course["heure"], "%H:%M")
-            dt = france_tz.localize(dt.replace(
-                year=now_utc.year, month=now_utc.month, day=now_utc.day))
+            dt = france_tz.localize(dt.replace(year=now_utc.year, month=now_utc.month, day=now_utc.day))
             course_time_utc = dt.astimezone(pytz.utc)
         except:
             continue
 
         delta = course_time_utc - now_utc
         if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-            msg = generate_prono_message(course)
-            send_telegram(msg)
-            print(f"Envoyé : {course['description']} à {course['heure']}")
+            if course["description"] not in sent_courses:
+                msg = generate_prono_message(course)
+                send_telegram(msg)
+                sent_courses.add(course["description"])
+                print(f"Envoyé : {course['description']} à {course['heure']}")
 
 if __name__ == "__main__":
     main()

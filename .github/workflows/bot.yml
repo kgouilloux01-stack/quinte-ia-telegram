@@ -1,22 +1,26 @@
-name: Turfoo IA Bot
+name: Telegram Quinté Bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/1 * * * *"   # toutes les minutes (heure UTC GitHub)
   workflow_dispatch:
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: pip install requests pytz
+      - name: Installer les dépendances
+        run: |
+          pip install requests beautifulsoup4 pytz
 
-      - name: Run bot
+      - name: Lancer le bot
         run: python bot.py

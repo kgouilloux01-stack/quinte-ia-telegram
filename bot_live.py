@@ -6,8 +6,8 @@ import telegram
 # ------------------------------
 # CONFIGURATION
 # ------------------------------
-TELEGRAM_TOKEN = "TON_TOKEN_ICI"
-CHAT_ID = "TON_CHAT_ID_ICI"
+TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
+CHANNEL_ID = -1003505856903  # Canal QuinteIA
 
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 

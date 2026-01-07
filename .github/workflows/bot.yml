@@ -1,4 +1,4 @@
-name: Prono IA Courses
+name: Turfoo IA Bot
 
 on:
   schedule:
@@ -8,7 +8,6 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -16,8 +15,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Installer dépendances
-        run: pip install requests beautifulsoup4 pytz
+      - name: Install deps
+        run: pip install requests pytz
 
-      - name: Lancer le bot
+      - name: Run bot
         run: python bot.py

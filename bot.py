@@ -4,56 +4,34 @@ import random
 from datetime import datetime, timedelta
 
 # =========================
-# CONFIGURATION DIRECTE
+# CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
 # =========================
-# FONCTION POUR RÉCUPÉRER LES COURSES
+# EXTRACTION PROGRAMME ZETURF
 # =========================
-def get_letrot_courses():
-    url = "https://www.letrot.com/courses/aujourd-hui"
+def get_zeturf_programme():
+    url = "https://www.zeturf.fr/"  # page de programme
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     courses = []
-    
-    # On cherche chaque bloc ligne avec heure et description
-    for ligne in soup.select("div .course-list-item, tr"):  # selon structure
-        try:
-            # Heure : souvent en début de ligne
-            text = ligne.get_text(separator=" ").strip()
-            parts = text.split()
-            if len(parts) < 2:
+    # ZEturf affiche des lignes de type "R1 FR1 – PAU … 13h55 - Prix …"
+    for line in soup.find_all(text=True):
+        text = line.strip()
+        # on filtre texte qui ressemble à une course
+        if " - " in text and any(c.isdigit() for c in text[:5]):
+            # exemple : "13h55 - R1 FR1 – PAU – Prix de Baleix"
+            parts = text.split(" - ")
+            # première partie : heure
+            heure = parts[0].replace("h", ":").strip()
+            if ":" not in heure: 
                 continue
-
-            # Cherche un format d'heure (ex : 11:30 ou 11h30)
-            heure = None
-            for p in parts:
-                if ":" in p and p.replace(":", "").isdigit():
-                    heure = p
-                    break
-                if "h" in p and p.replace("h", "").isdigit():
-                    heure = p.replace("h", ":")
-                    break
-            if not heure:
-                continue
-
-            # Hippodrome / Course normalement quelque part
-            hippodrome = "Course"
-
-            # Le nom complet si disponible
-            title = text
-
-            courses.append({
-                "heure": heure,
-                "description": title,
-                "hippodrome": hippodrome
-            })
-        except Exception:
-            continue
-
+            # description complète
+            desc = text
+            courses.append({"heure": heure, "description": desc})
     return courses
 
 # =========================
@@ -66,7 +44,7 @@ def compute_scores(n=16):
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
 def generate_prono_message(course):
-    texte = "🤖 **PRONOSTIC IA – TROT À VENIR**\n\n"
+    texte = "🤖 **PRONOSTIC IA – COURSE À VENIR**\n\n"
     texte += f"📍 {course['description']}\n"
     texte += f"⏱️ Heure : {course['heure']}\n\n"
     texte += "👉 **Top 5 IA :**\n"
@@ -84,25 +62,24 @@ def send_telegram(message):
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
 # =========================
-# MAIN – ENVOI 10MIN AVANT
+# MAIN – ENVOI 10min avant
 # =========================
 def main():
     now = datetime.now()
-    courses = get_letrot_courses()
+    courses = get_zeturf_programme()
 
-    for course in courses:
+    for c in courses:
         try:
-            course_time = datetime.strptime(course["heure"], "%H:%M")
-            # ajoute la date du jour
-            course_time = course_time.replace(year=now.year, month=now.month, day=now.day)
+            hour_dt = datetime.strptime(c["heure"], "%H:%M")
+            # remplace date
+            hour_dt = hour_dt.replace(year=now.year, month=now.month, day=now.day)
         except:
             continue
 
-        # si la course commence dans 10 minutes ou moins
-        diff = course_time - now
-        if timedelta(minutes=0) <= diff <= timedelta(minutes=10):
-            message = generate_prono_message(course)
-            send_telegram(message)
+        delta = hour_dt - now
+        if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
+            msg = generate_prono_message(c)
+            send_telegram(msg)
 
 if __name__ == "__main__":
     main()

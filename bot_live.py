@@ -1,16 +1,15 @@
 import requests
 from bs4 import BeautifulSoup
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
-import time
 
 # =========================
 # CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # Canal QuinteIA
-DELAY_BEFORE_RACE = 999  # minutes avant le départ
+CHANNEL_ID = -1003505856903  # Canal Telegram QuinteIA
+DELAY_BEFORE_RACE = 10  # minutes avant le départ
 
 # =========================
 # RÉCUPÉRATION DES COURSES DU JOUR
@@ -22,10 +21,9 @@ def get_courses():
 
     courses = []
     try:
-        # Chaque course est dans un div avec InfosCourse
         course_sections = soup.find_all("div", {"class": "InfosCourse"})
         for section in course_sections:
-            # Hippodrome, Allocation, Distance
+            # Allocation et distance
             allocation, distance = "Allocation inconnue", "Distance inconnue"
             p = section.find("p")
             if p:
@@ -35,19 +33,17 @@ def get_courses():
                     if "Distance" in part:
                         distance = part.strip()
 
-            # Heure départ et hippodrome
+            # Hippodrome et date/heure
             parent = section.find_parent()
             depart_div = parent.find("div", {"class": "DepartQ"})
             if depart_div:
-                parts = [p.strip() for p in depart_div.text.split("-")]
+                parts = [x.strip() for x in depart_div.text.split("-")]
                 if len(parts) >= 3:
                     hippodrome = parts[1].strip()
                     date_str = parts[2].strip()
                     try:
                         heure_depart = datetime.strptime(date_str, "%d/%m/%Y")
-                        # On suppose 15h15 par défaut sinon il faut parser l'heure exacte
-                        heure_depart = heure_depart.replace(hour=15, minute=15)
-                        # Fuseau horaire France
+                        heure_depart = heure_depart.replace(hour=15, minute=15)  # valeur par défaut si pas d'heure exacte
                         tz = pytz.timezone("Europe/Paris")
                         heure_depart = tz.localize(heure_depart)
                     except:
@@ -74,7 +70,7 @@ def get_courses():
     return courses
 
 # =========================
-# CALCUL DES SCORES IA
+# CALCUL SCORES IA
 # =========================
 def compute_scores(horses):
     for h in horses:
@@ -117,7 +113,7 @@ def send_telegram(message):
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
 # =========================
-# MAIN LIVE
+# MAIN
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
@@ -126,6 +122,7 @@ def main():
 
     for course in courses:
         delta_minutes = (course["heure_depart"] - now).total_seconds() / 60
+        # Vérifie si on est dans la fenêtre DELAY_BEFORE_RACE
         if 0 <= delta_minutes <= DELAY_BEFORE_RACE:
             msg = generate_message(course)
             send_telegram(msg)

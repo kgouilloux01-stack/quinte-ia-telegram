@@ -27,12 +27,10 @@ def get_courses_selenium():
     driver = webdriver.Chrome(options=options)
     driver.get(COINTURF_URL)
 
-    # attendre que le JS charge
     time.sleep(5)
 
     courses = []
 
-    # chaque course est dans un div avec class "programmeItem" sur Coin-Turf
     rows = driver.find_elements(By.CSS_SELECTOR, ".programmeItem")
     for r in rows:
         try:
@@ -53,7 +51,7 @@ def get_courses_selenium():
 # PRONOSTIC IA
 # =========================
 def compute_scores(n=16):
-    horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, n+1)]
+    horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, n + 1)]
     for h in horses:
         h["score"] = random.randint(70, 90)
     return sorted(horses, key=lambda x: x["score"], reverse=True)
@@ -83,19 +81,22 @@ def main():
         print("Aucune course trouvée !")
         return
 
-    sent_courses = set()  # pour éviter les doublons
+    sent_courses = set()
 
     for course in courses:
         try:
             dt = datetime.strptime(course["heure"], "%H:%M")
-            dt = france_tz.localize(dt.replace(
-                year=now_utc.year, month=now_utc.month, day=now_utc.day))
+            dt = france_tz.localize(
+                dt.replace(year=now_utc.year, month=now_utc.month, day=now_utc.day)
+            )
             course_time_utc = dt.astimezone(pytz.utc)
         except:
             continue
 
         delta = course_time_utc - now_utc
-        if timedelta(minutes=0) <= delta <= timedelta(minutes=10]:
+
+        # ✅ LIGNE CORRIGÉE ICI
+        if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
             if course["description"] not in sent_courses:
                 msg = generate_prono_message(course)
                 send_telegram(msg)

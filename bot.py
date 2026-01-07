@@ -4,70 +4,72 @@ import random
 from datetime import datetime, timedelta
 
 # =========================
-# CONFIGURATION DIRECTE
+# CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
 # =========================
-# FONCTIONS =================
+# FONCTIONS
 # =========================
-
 def get_courses_today():
-    """Récupère toutes les courses du jour sur Coin-Turf"""
+    """Récupère toutes les courses du jour sur Coin-Turf avec heure et chevaux"""
     url = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     courses = []
 
-    try:
-        # Chaque course est dans une div avec class "InfosCourse"
-        infos_courses = soup.find_all("div", {"class": "InfosCourse"})
-        for info in infos_courses:
-            try:
-                # Hippodrome et date
-                depart = info.find_previous("div", {"class": "DepartQ"}).text.strip().split("-")
-                hippodrome = depart[1].strip() if len(depart) >= 3 else "Hippodrome inconnu"
-                date_course = depart[2].strip() if len(depart) >= 3 else "Date inconnue"
+    # Les div avec class "InfosCourse" contiennent les infos
+    infos_courses = soup.find_all("div", {"class": "InfosCourse"})
+    for info in infos_courses:
+        try:
+            # Hippodrome et date
+            depart_div = info.find_previous("div", {"class": "DepartQ"})
+            if depart_div:
+                parts = [p.strip() for p in depart_div.text.split("-")]
+                hippodrome = parts[1].strip() if len(parts) >= 3 else "Hippodrome inconnu"
+                date_course = parts[2].strip() if len(parts) >= 3 else "Date inconnue"
+            else:
+                hippodrome = "Hippodrome inconnu"
+                date_course = "Date inconnue"
 
-                # Allocation et distance
-                parts = info.text.split(" - ")
-                allocation = next((p.strip() for p in parts if "Allocation" in p), "Allocation inconnue")
-                distance = next((p.strip() for p in parts if "Distance" in p), "Distance inconnue")
+            # Heure de la course
+            heure_tag = info.find("span", {"class": "heure"})
+            heure = heure_tag.text.strip() if heure_tag else "00:00"
 
-                # Heure
-                heure_text = info.find("span", {"class": "heure"}).text.strip() if info.find("span", {"class": "heure"}) else "00:00"
+            # Allocation et distance
+            parts = info.text.split(" - ")
+            allocation = next((p.strip() for p in parts if "Allocation" in p), "Allocation inconnue")
+            distance = next((p.strip() for p in parts if "Distance" in p), "Distance inconnue")
 
-                # Chevaux
-                horses = []
-                table = info.find_next("table", {"class": "table"})
-                if table:
-                    rows = table.find_all("tr")[1:]
-                    for row in rows:
-                        cols = row.find_all("td")
-                        if len(cols) >= 2:
-                            num = cols[0].text.strip()
-                            name = cols[1].text.strip()
-                            horses.append({"num": num, "name": name})
-                        else:
-                            num = cols[0].text.strip()
-                            horses.append({"num": num, "name": f"Cheval {num}"})
-                else:
-                    horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
+            # Chevaux
+            horses = []
+            table = info.find_next("table", {"class": "table"})
+            if table:
+                rows = table.find_all("tr")[1:]  # Skip header
+                for row in rows:
+                    cols = row.find_all("td")
+                    if len(cols) >= 2:
+                        num = cols[0].text.strip()
+                        name = cols[1].text.strip()
+                        horses.append({"num": num, "name": name})
+                    else:
+                        num = cols[0].text.strip()
+                        horses.append({"num": num, "name": f"Cheval {num}"})
+            else:
+                horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
-                courses.append({
-                    "hippodrome": hippodrome,
-                    "date": date_course,
-                    "heure": heure_text,
-                    "allocation": allocation,
-                    "distance": distance,
-                    "horses": horses
-                })
-            except:
-                continue
-    except:
-        pass
+            courses.append({
+                "hippodrome": hippodrome,
+                "date": date_course,
+                "heure": heure,
+                "allocation": allocation,
+                "distance": distance,
+                "horses": horses
+            })
+        except:
+            continue
 
     return courses
 
@@ -105,24 +107,23 @@ def send_telegram(message):
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
 # =========================
-# MAIN =====================
+# MAIN
 # =========================
-
 def main():
     now = datetime.now()
     courses = get_courses_today()
 
     for course in courses:
-        # Convertir heure en datetime
         try:
+            # Heure complète de la course
             course_time = datetime.strptime(course["heure"], "%H:%M")
             course_time = course_time.replace(year=now.year, month=now.month, day=now.day)
         except:
             continue
 
-        # Vérifier si la course commence dans 10 minutes
+        # Vérifier si la course commence dans les 10 minutes
         delta = course_time - now
-        if timedelta(minutes=9) <= delta <= timedelta(minutes=11):
+        if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
             sorted_horses = compute_scores(course["horses"])
             message = generate_message(
                 course["hippodrome"],

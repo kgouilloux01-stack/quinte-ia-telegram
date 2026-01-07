@@ -16,7 +16,6 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # ===== Hippodrome et date =====
     hippodrome = "Hippodrome inconnu"
     date_course = "Date inconnue"
     try:
@@ -26,10 +25,9 @@ def get_quinte_info():
             if len(parts) >= 3:
                 hippodrome = parts[1].strip()
                 date_course = parts[2].strip()
-    except Exception as e:
-        print(f"Erreur récupération hippodrome/date : {e}")
+    except:
+        pass
 
-    # ===== Allocation et distance =====
     allocation = "Allocation inconnue"
     distance = "Distance inconnue"
     try:
@@ -41,14 +39,13 @@ def get_quinte_info():
                     allocation = p.strip()
                 if "Distance" in p:
                     distance = p.strip()
-    except Exception as e:
-        print(f"Erreur récupération allocation/distance : {e}")
+    except:
+        pass
 
-    # ===== Chevaux et numéros =====
     horses = []
     try:
         table = soup.find("table", {"class": "table"})
-        rows = table.find_all("tr")[1:]  # skip header
+        rows = table.find_all("tr")[1:]
         for row in rows:
             cols = row.find_all("td")
             if len(cols) >= 2:
@@ -58,8 +55,7 @@ def get_quinte_info():
             else:
                 num = cols[0].text.strip()
                 horses.append({"num": num, "name": f"Cheval {num}"})
-    except Exception as e:
-        print(f"Erreur récupération chevaux : {e}")
+    except:
         horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
     return hippodrome, date_course, allocation, distance, horses

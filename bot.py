@@ -5,65 +5,58 @@ from datetime import datetime, timedelta
 import pytz
 
 # =========================
-# CONFIGURATION DIRECTE
+# CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
+COINTURF_URL = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
 
-# URL du programme des courses PMU aujourd'hui
-GENY_URL = "https://www.geny.com/reunions-courses-pmu"
-
-def get_geny_programme():
-    resp = requests.get(GENY_URL)
+# =========================
+# SCRAPING COIN-TURF
+# =========================
+def get_courses():
+    resp = requests.get(COINTURF_URL)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     courses = []
-    # On va parcourir chaque bloc "Réunion"
-    for meeting in soup.select("div[class*=reunion]"):
-        # horaire de la réunion si présent
-        # format ex: "Début des opérations vers 12:55"
-        time_text = meeting.find(text=lambda t: "vers" in t)
-        base_time = None
-        if time_text:
-            parts = time_text.split()
-            for part in parts:
-                if ":" in part and len(part) >= 4:
-                    base_time = part
-                    break
 
-        # on récupère les lignes de courses
-        for row in meeting.find_all("div", class_="course-title"):
-            # texte ex: "1 - Prix de Baleix – 10 Partants"
-            txt = row.get_text(" ", strip=True)
-            parts = txt.split(" - ", 1)
-            if len(parts) < 2:
-                continue
-
-            # numéro et nom de la course
-            num_name = parts[1]
-
-            # heure finale de cette course
-            # si base_time présent on utilise base_time + offset éventuel
-            if base_time:
-                heure = base_time
+    # Recherche de l'hippodrome et date
+    try:
+        depart_div = soup.find("div", {"class": "DepartQ"})
+        if depart_div:
+            parts = [p.strip() for p in depart_div.text.split("-")]
+            if len(parts) >= 3:
+                hippodrome = parts[1].strip()
+                date_course = parts[2].strip()
             else:
-                # fallback à la recherche d'une heure dans la ligne
-                heure = None
-                for token in parts[1].split():
-                    if ":" in token:
-                        heure = token
-                        break
-            if not heure:
-                continue
+                hippodrome, date_course = "Inconnu", "Inconnu"
+    except:
+        hippodrome, date_course = "Inconnu", "Inconnu"
 
-            courses.append({
-                "heure": heure,
-                "description": num_name
-            })
+    # Chevaux et numéro
+    try:
+        table = soup.find("table", {"class": "table"})
+        rows = table.find_all("tr")[1:]
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) >= 2:
+                num = cols[0].text.strip()
+                name = cols[1].text.strip()
+                # Ici on peut imaginer que l'heure est la même pour toutes les courses pour simplifier
+                courses.append({
+                    "heure": "13:25",  # mettre l'heure réelle si tu peux la récupérer
+                    "description": f"{hippodrome} - {name}"
+                })
+    except:
+        # fallback si impossible
+        courses.append({"heure": "13:25", "description": f"{hippodrome} - Course inconnue"})
 
     return courses
 
-def compute_scores(num_chevaux=8):
+# =========================
+# PRONOSTIC IA
+# =========================
+def compute_scores(num_chevaux=16):
     horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, num_chevaux+1)]
     for h in horses:
         h["score"] = random.randint(70, 90)
@@ -81,31 +74,32 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
+# =========================
+# MAIN
+# =========================
 def main():
     now_utc = datetime.now(pytz.utc)
     france_tz = pytz.timezone("Europe/Paris")
 
-    courses = get_geny_programme()
+    courses = get_courses()
     if not courses:
-        print("Aucune course trouvée.")
+        print("Aucune course trouvée !")
         return
 
     for course in courses:
         try:
-            # parse l'heure (ex. "12:55")
-            dt = datetime.strptime(course["heure"], "%H:%M")
-            dt = france_tz.localize(dt.replace(
+            course_time = datetime.strptime(course["heure"], "%H:%M")
+            course_time = france_tz.localize(course_time.replace(
                 year=now_utc.year, month=now_utc.month, day=now_utc.day))
-            dt_utc = dt.astimezone(pytz.utc)
+            course_time_utc = course_time.astimezone(pytz.utc)
         except:
             continue
 
-        delta = dt_utc - now_utc
-        # envoie si la course commence dans < 10 min
+        delta = course_time_utc - now_utc
         if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
             msg = generate_prono_message(course)
             send_telegram(msg)
-            print(f"Envoyé pour {course['description']}")
+            print(f"Envoyé : {course['description']} à {course['heure']}")
 
 if __name__ == "__main__":
     main()

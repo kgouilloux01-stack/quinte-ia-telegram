@@ -5,14 +5,14 @@ from datetime import datetime, timedelta
 import pytz
 
 # =========================
-# CONFIG
+# CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903
-DELAY_BEFORE_RACE = 9999  # Forcer l'envoi immédiat pour test
+CHANNEL_ID = -1003505856903  # Canal QuinteIA
+DELAY_BEFORE_RACE = 10  # minutes avant le départ
 
 # =========================
-# Récupération courses
+# RÉCUPÉRATION DES COURSES DU JOUR
 # =========================
 def get_courses():
     url = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
@@ -20,48 +20,66 @@ def get_courses():
     soup = BeautifulSoup(resp.text, "html.parser")
 
     courses = []
+    tz = pytz.timezone("Europe/Paris")
+    today = datetime.now(tz).date()
 
-    course_sections = soup.find_all("div", {"class": "InfosCourse"})
-    for section in course_sections:
-        allocation, distance = "Allocation inconnue", "Distance inconnue"
-        p = section.find("p")
-        if p:
-            for part in p.text.split(" - "):
-                if "Allocation" in part:
-                    allocation = part.strip()
-                if "Distance" in part:
-                    distance = part.strip()
+    try:
+        # Chaque course est dans un div avec InfosCourse
+        course_sections = soup.find_all("div", {"class": "InfosCourse"})
+        for section in course_sections:
+            # Allocation et distance
+            allocation, distance = "Allocation inconnue", "Distance inconnue"
+            p = section.find("p")
+            if p:
+                for part in p.text.split(" - "):
+                    if "Allocation" in part:
+                        allocation = part.strip()
+                    if "Distance" in part:
+                        distance = part.strip()
 
-        parent = section.find_parent()
-        depart_div = parent.find("div", {"class": "DepartQ"})
-        if depart_div:
-            parts = [p.strip() for p in depart_div.text.split("-")]
-            hippodrome = parts[1].strip() if len(parts) >= 2 else "Hippodrome inconnu"
-            date_str = parts[2].strip() if len(parts) >= 3 else None
-            try:
-                heure_depart = datetime.strptime(date_str, "%d/%m/%Y").replace(hour=15, minute=15)
-                tz = pytz.timezone("Europe/Paris")
-                heure_depart = tz.localize(heure_depart)
-            except:
-                heure_depart = datetime.now(pytz.timezone("Europe/Paris"))
-        else:
-            hippodrome = "Hippodrome inconnu"
-            heure_depart = datetime.now(pytz.timezone("Europe/Paris"))
+            # Heure départ et hippodrome
+            parent = section.find_parent()
+            depart_div = parent.find("div", {"class": "DepartQ"})
+            if depart_div:
+                parts = [p.strip() for p in depart_div.text.split("-")]
+                if len(parts) >= 3:
+                    hippodrome = parts[1].strip()
+                    date_str = parts[2].strip()
+                    try:
+                        # Heure par défaut à 15h15 si non précisée
+                        heure_depart = datetime.strptime(date_str, "%d/%m/%Y")
+                        heure_depart = heure_depart.replace(hour=15, minute=15)
+                        heure_depart = tz.localize(heure_depart)
+                    except:
+                        heure_depart = datetime.now(tz)
+                else:
+                    hippodrome = "Hippodrome inconnu"
+                    heure_depart = datetime.now(tz)
+            else:
+                hippodrome = "Hippodrome inconnu"
+                heure_depart = datetime.now(tz)
 
-        horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
+            # Filtre uniquement les courses du jour
+            if heure_depart.date() != today:
+                continue
 
-        courses.append({
-            "hippodrome": hippodrome,
-            "heure_depart": heure_depart,
-            "allocation": allocation,
-            "distance": distance,
-            "horses": horses
-        })
-    print("DEBUG COURSES:", courses)  # Vérification courses détectées
+            # Chevaux fictifs pour IA
+            horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
+
+            courses.append({
+                "hippodrome": hippodrome,
+                "heure_depart": heure_depart,
+                "allocation": allocation,
+                "distance": distance,
+                "horses": horses
+            })
+    except Exception as e:
+        print("Erreur récupération courses:", e)
+
     return courses
 
 # =========================
-# Scores IA
+# CALCUL DES SCORES IA
 # =========================
 def compute_scores(horses):
     for h in horses:
@@ -69,7 +87,7 @@ def compute_scores(horses):
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
 # =========================
-# Génération message
+# GÉNÉRATION DU MESSAGE
 # =========================
 def generate_message(course):
     top5 = compute_scores(course["horses"])[:5]
@@ -97,15 +115,14 @@ def generate_message(course):
     return texte
 
 # =========================
-# Telegram
+# ENVOI TELEGRAM
 # =========================
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    r = requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
-    print("DEBUG TELEGRAM STATUS:", r.status_code)
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
 # =========================
-# MAIN
+# MAIN LIVE
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
@@ -114,7 +131,6 @@ def main():
 
     for course in courses:
         delta_minutes = (course["heure_depart"] - now).total_seconds() / 60
-        print(f"DEBUG DELTA ({course['hippodrome']}):", delta_minutes)
         if 0 <= delta_minutes <= DELAY_BEFORE_RACE:
             msg = generate_message(course)
             send_telegram(msg)

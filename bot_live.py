@@ -1,88 +1,85 @@
 import requests
 from bs4 import BeautifulSoup
+import telegram
 from datetime import datetime, timedelta
-import pytz
 import os
-import random
+import json
+import time
 
-# ================= CONFIG =================
-TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # Canal QuinteIA
-DELAY_BEFORE_RACE = 10  # minutes
+# --- CONFIG ---
+TELEGRAM_TOKEN = os.getenv("8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4")  # mettre en secret GitHub
+CHANNEL_ID = int(os.getenv("-1003505856903 "))     # mettre en secret GitHub
+CHECK_INTERVAL = 60  # vérifier chaque minute
+SENT_FILE = "sent_live.json"
 
-TZ = pytz.timezone("Europe/Paris")
-NOW = datetime.now(TZ)
+bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
-SENT_FILE = "sent_live.txt"
-if not os.path.exists(SENT_FILE):
-    open(SENT_FILE, "w").close()
-
-with open(SENT_FILE) as f:
-    SENT = set(f.read().splitlines())
-
-# ================= TELEGRAM =================
-def send(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
-
-# ================= IA =================
-def ia_prono():
-    chevaux = list(range(1, 17))
-    random.shuffle(chevaux)
-    top5 = chevaux[:5]
-    return f"🤖 LECTURE IA\n🥇 {top5[0]} 🥈 {top5[1]} 🥉 {top5[2]} 4️⃣ {top5[3]} 5️⃣ {top5[4]}"
-
-# ================= COURSES =================
-def get_courses():
-    url = "https://www.coin-turf.fr/"
-    soup = BeautifulSoup(requests.get(url).text, "html.parser")
-
+# --- FONCTIONS ---
+def get_today_courses():
+    url = "https://www.pmu.fr/turf/courses-hippiques"
+    resp = requests.get(url)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    
     courses = []
-
-    for bloc in soup.select("div.course"):
-        try:
-            hippodrome = bloc.select_one(".hippo").text.strip()
-            heure_txt = bloc.select_one(".heure").text.strip()
-
-            heure = datetime.strptime(heure_txt, "%H:%M")
-            heure = TZ.localize(
-                datetime(
-                    NOW.year, NOW.month, NOW.day,
-                    heure.hour, heure.minute
-                )
-            )
-
+    for reunion in soup.select(".ContentProgHeader.PROGRAMMEE"):
+        reunion_name = reunion.get_text(strip=True)
+        table = reunion.find_next("table")
+        if not table:
+            continue
+        for tr in table.find_all("tr", class_="clickable-row"):
+            course_id = tr.get("id")
+            title_td = tr.find("td", class_="td2")
+            if not title_td:
+                continue
+            title = title_td.get_text(strip=True)
+            
+            countdown = tr.find("td", class_="td3")
+            if countdown and countdown.get("data-countdown"):
+                timestamp = int(countdown["data-countdown"]) // 1000
+                course_time = datetime.fromtimestamp(timestamp)
+            else:
+                continue
+            
             courses.append({
-                "id": f"{hippodrome}_{heure_txt}",
-                "hippodrome": hippodrome,
-                "heure": heure
+                "id": course_id,
+                "reunion": reunion_name,
+                "title": title,
+                "time": course_time.isoformat()
             })
-        except:
-            pass
-
     return courses
 
-# ================= MAIN =================
-def main():
-    courses = get_courses()
-    print(f"📌 {len(courses)} courses détectées")
+def load_sent():
+    if os.path.exists(SENT_FILE):
+        with open(SENT_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
 
-    for c in courses:
-        delta = (c["heure"] - NOW).total_seconds() / 60
-        print(f"{c['hippodrome']} {c['heure'].strftime('%H:%M')} → {delta:.1f} min")
+def save_sent(sent_ids):
+    with open(SENT_FILE, "w") as f:
+        json.dump(list(sent_ids), f)
 
-        if 0 <= delta <= DELAY_BEFORE_RACE and c["id"] not in SENT:
-            msg = (
-                f"🏇 {c['hippodrome']} – {c['heure'].strftime('%H:%M')}\n\n"
-                f"{ia_prono()}\n\n"
-                "🔒 Analyse exclusive – @QuinteIA"
-            )
-            send(msg)
+def generate_prono(course):
+    return f"🏇 PRONO LIVE !\n{course['reunion']} - {course['title']}\nDépart prévu : {datetime.fromisoformat(course['time']).strftime('%H:%M')}\n💡 Mon pronostic IA : #ÀFAIRE"
 
-            with open(SENT_FILE, "a") as f:
-                f.write(c["id"] + "\n")
+# --- LOOP PRINCIPALE ---
+sent_ids = load_sent()
 
-            print("✅ ENVOYÉ")
-
-if __name__ == "__main__":
-    main()
+while True:
+    courses = get_today_courses()
+    now = datetime.now()
+    
+    for course in courses:
+        if course["id"] in sent_ids:
+            continue
+        course_time = datetime.fromisoformat(course["time"])
+        delta = (course_time - now).total_seconds()
+        if 0 < delta <= 600:  # 10 minutes avant
+            message = generate_prono(course)
+            try:
+                bot.send_message(chat_id=CHANNEL_ID, text=message)
+                print(f"Envoyé pour {course['title']} à {now}")
+                sent_ids.add(course["id"])
+                save_sent(sent_ids)
+            except Exception as e:
+                print(f"Erreur Telegram: {e}")
+    time.sleep(CHECK_INTERVAL)

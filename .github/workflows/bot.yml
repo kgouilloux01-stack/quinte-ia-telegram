@@ -1,22 +1,22 @@
-name: Telegram Quinté Bot
+name: Telegram Turfoo Bot
 
+# Exécution toutes les 5 minutes
 on:
   schedule:
-    # tous les 5 minutes
     - cron: '*/5 * * * *'
-  workflow_dispatch:
+  workflow_dispatch:  # permet de lancer manuellement si besoin
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Récupérer ton code
+      # 1️⃣ Récupérer le code
       - name: Checkout du code
         uses: actions/checkout@v4
 
       # 2️⃣ Installer Python
-      - name: Installer Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -24,9 +24,7 @@ jobs:
       # 3️⃣ Installer les dépendances
       - name: Installer les dépendances
         run: |
-          pip install requests
-          pip install beautifulsoup4
-          pip install pytz
+          pip install requests beautifulsoup4 pytz
 
       # 4️⃣ Lancer le bot
       - name: Lancer le bot

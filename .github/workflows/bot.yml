@@ -1,9 +1,11 @@
 name: Telegram Quinté Bot
 
+# =========================
 # Lancer automatiquement tous les jours à 8h FR
+# =========================
 on:
   schedule:
-    - cron: '0 8 * * *'  # tous les jours à 08:00 heure FR
+    - cron: '7 7 * * *' # 8h France = 7h UTC (hiver), 6h UTC en été → tu peux ajuster si besoin
   workflow_dispatch:
 
 jobs:
@@ -11,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Récupérer ton code
+      # 1️⃣ Récupérer le code
       - name: Checkout du code
         uses: actions/checkout@v4
 
@@ -28,5 +30,5 @@ jobs:
           pip install beautifulsoup4
 
       # 4️⃣ Lancer le bot
-      - name: Lancer le bot
-        run: python bot.py
+      - name: Lancer le bot Telegram
+        run: python bot_live.py

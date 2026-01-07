@@ -131,6 +131,9 @@ def main():
 
     for course in courses:
         delta_minutes = (course["heure_depart"] - now).total_seconds() / 60
+        # === DEBUG ===
+        print(f"{course['hippodrome']} à {course['heure_depart'].strftime('%H:%M')} (delta {delta_minutes:.1f} min)")
+
         if 0 <= delta_minutes <= DELAY_BEFORE_RACE:
             msg = generate_message(course)
             send_telegram(msg)

@@ -1,80 +1,88 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
-import telegram
+from datetime import datetime, timedelta
+import pytz
+import os
+import random
 
-# ------------------------------
-# CONFIGURATION
-# ------------------------------
+# ================= CONFIG =================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # Canal QuinteIA
+DELAY_BEFORE_RACE = 10  # minutes
 
-bot = telegram.Bot(token=TELEGRAM_TOKEN)
+TZ = pytz.timezone("Europe/Paris")
+NOW = datetime.now(TZ)
 
-URL_PROGRAMMES = "https://www.coin-turf.fr/programmes-courses"
+SENT_FILE = "sent_live.txt"
+if not os.path.exists(SENT_FILE):
+    open(SENT_FILE, "w").close()
 
-# ------------------------------
-# FONCTION POUR EXTRAIRE LES COURSES
-# ------------------------------
+with open(SENT_FILE) as f:
+    SENT = set(f.read().splitlines())
+
+# ================= TELEGRAM =================
+def send(msg):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
+
+# ================= IA =================
+def ia_prono():
+    chevaux = list(range(1, 17))
+    random.shuffle(chevaux)
+    top5 = chevaux[:5]
+    return f"🤖 LECTURE IA\n🥇 {top5[0]} 🥈 {top5[1]} 🥉 {top5[2]} 4️⃣ {top5[3]} 5️⃣ {top5[4]}"
+
+# ================= COURSES =================
 def get_courses():
-    res = requests.get(URL_PROGRAMMES)
-    soup = BeautifulSoup(res.text, "html.parser")
+    url = "https://www.coin-turf.fr/"
+    soup = BeautifulSoup(requests.get(url).text, "html.parser")
+
     courses = []
 
-    for reunion_div in soup.select("div.ContentProgHeader.PROGRAMMEE"):
-        reunion_num = reunion_div.select_one("span.ReunionNumero").text.strip()
-        hippodrome = reunion_div.select_one("span.ReunionTitre").text.strip()
-        
-        # la table qui suit la réunion
-        table = reunion_div.find_next_sibling("table")
-        if not table:
-            continue
-        
-        for tr in table.select("tr.clickable-row"):
-            course_num = tr.select_one("td.td1").text.strip()
-            titre_div = tr.select_one("td.td2 div.TdTitre")
-            title = titre_div.text.strip() if titre_div else "N/A"
-            
-            # vérifier si la course est annulée
-            heure_td = tr.select_one("td.td3.countdown")
-            if heure_td:
-                timestamp_ms = int(heure_td["data-countdown"])
-                heure = datetime.fromtimestamp(timestamp_ms / 1000).strftime("%H:%M")
-            else:
-                heure = "Annulée"
-            
-            url_course = tr.get("data-href", "#")
-            
-            # ignorer les courses annulées
-            if heure != "Annulée":
-                courses.append({
-                    "reunion": reunion_num,
-                    "hippodrome": hippodrome,
-                    "course": course_num,
-                    "titre": title,
-                    "heure": heure,
-                    "url": f"https://www.coin-turf.fr{url_course}"
-                })
+    for bloc in soup.select("div.course"):
+        try:
+            hippodrome = bloc.select_one(".hippo").text.strip()
+            heure_txt = bloc.select_one(".heure").text.strip()
+
+            heure = datetime.strptime(heure_txt, "%H:%M")
+            heure = TZ.localize(
+                datetime(
+                    NOW.year, NOW.month, NOW.day,
+                    heure.hour, heure.minute
+                )
+            )
+
+            courses.append({
+                "id": f"{hippodrome}_{heure_txt}",
+                "hippodrome": hippodrome,
+                "heure": heure
+            })
+        except:
+            pass
+
     return courses
 
-# ------------------------------
-# FONCTION POUR ENVOYER SUR TELEGRAM
-# ------------------------------
-def send_telegram_message(courses):
-    if not courses:
-        bot.send_message(chat_id=CHAT_ID, text="📌 0 courses détectées aujourd'hui")
-        return
+# ================= MAIN =================
+def main():
+    courses = get_courses()
+    print(f"📌 {len(courses)} courses détectées")
 
     for c in courses:
-        message = f"🏇 {c['reunion']} - {c['hippodrome']}\n" \
-                  f"{c['course']} : {c['titre']}\n" \
-                  f"🕒 Heure : {c['heure']}\n" \
-                  f"🔗 {c['url']}"
-        bot.send_message(chat_id=CHAT_ID, text=message)
+        delta = (c["heure"] - NOW).total_seconds() / 60
+        print(f"{c['hippodrome']} {c['heure'].strftime('%H:%M')} → {delta:.1f} min")
 
-# ------------------------------
-# MAIN
-# ------------------------------
+        if 0 <= delta <= DELAY_BEFORE_RACE and c["id"] not in SENT:
+            msg = (
+                f"🏇 {c['hippodrome']} – {c['heure'].strftime('%H:%M')}\n\n"
+                f"{ia_prono()}\n\n"
+                "🔒 Analyse exclusive – @QuinteIA"
+            )
+            send(msg)
+
+            with open(SENT_FILE, "a") as f:
+                f.write(c["id"] + "\n")
+
+            print("✅ ENVOYÉ")
+
 if __name__ == "__main__":
-    courses = get_courses()
-    send_telegram_message(courses)
+    main()

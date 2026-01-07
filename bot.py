@@ -1,6 +1,3 @@
-### 📌 `bot.py`
-
-```python
 import requests
 from bs4 import BeautifulSoup
 import random
@@ -23,14 +20,12 @@ def get_turfoo_programme():
     courses = []
     text = soup.get_text(separator="\n")
 
-    # On split chaque ligne du texte
     for line in text.split("\n"):
         line = line.strip()
         if not line:
             continue
 
-        # On ne garde que les lignes qui commencent par "C" suivi d'un chiffre
-        # et qui contiennent une heure au format HH:MM
+        # On prend les lignes commençant par "C" + chiffre et contenant ":"
         if line.startswith("C") and ":" in line:
             parts = line.split()
             heure = None
@@ -41,7 +36,7 @@ def get_turfoo_programme():
             if not heure:
                 continue
 
-            # TOUT ce qui vient avant l'heure est la description
+            # Description = tout ce qui vient avant l'heure
             desc_parts = []
             for p in parts:
                 if p == heure:

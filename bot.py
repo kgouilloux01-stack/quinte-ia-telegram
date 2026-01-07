@@ -1,38 +1,44 @@
 import requests
 from bs4 import BeautifulSoup
 import random
+from datetime import datetime, timedelta
+import pytz
 
+# =========================
+# CONFIGURATION
+# =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
+ZETURF_PROGRAMME_URL = "https://www.zeturf.fr/fr/programmes-et-pronostics"
 
-def get_turfoo_programme():
-    url = "https://www.turfoo.fr/programmes-courses/"
-    resp = requests.get(url)
+# =========================
+# SCRAPING ZETURF
+# =========================
+def get_zeturf_courses():
+    resp = requests.get(ZETURF_PROGRAMME_URL)
     soup = BeautifulSoup(resp.text, "html.parser")
     courses = []
-    text = soup.get_text(separator="\n")
-    for line in text.split("\n"):
-        line = line.strip()
-        if not line:
+
+    # Chaque course est dans un élément <a> avec class "course-item" ou similaire
+    for course_div in soup.find_all("a"):
+        text = course_div.get_text(strip=True)
+        if not text:
             continue
-        if line.startswith("C") and ":" in line:
-            parts = line.split()
-            heure = None
-            for p in parts:
-                if ":" in p and p.replace(":", "").isdigit():
-                    heure = p
-                    break
-            if not heure:
-                continue
-            desc_parts = []
-            for p in parts:
-                if p == heure:
-                    break
-                desc_parts.append(p)
-            description = " ".join(desc_parts).strip()
+        # On cherche une heure de type HH:MM dans le texte
+        parts = text.split()
+        heure = None
+        for p in parts:
+            if ":" in p and p.replace(":", "").isdigit():
+                heure = p
+                break
+        if heure:
+            description = text.replace(heure, "").strip()
             courses.append({"heure": heure, "description": description})
     return courses
 
+# =========================
+# PRONOSTIC IA SIMPLIFIÉ
+# =========================
 def compute_scores(n=16):
     horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, n+1)]
     for h in horses:
@@ -50,17 +56,35 @@ def generate_prono_message(course):
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     response = requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
-    print("Telegram response:", response.status_code, response.text)
+    print("Telegram response:", response.status_code)
 
+# =========================
+# MAIN – 10 MIN AVANT
+# =========================
 def main():
-    courses = get_turfoo_programme()
+    now_utc = datetime.now(pytz.utc)
+    france_tz = pytz.timezone("Europe/Paris")
+
+    courses = get_zeturf_courses()
     if not courses:
         print("Aucune course trouvée !")
         return
-    print(f"{len(courses)} courses trouvées.")  # <-- pour vérifier ce qui est récupéré
+
+    print(f"{len(courses)} courses trouvées.")
     for course in courses:
-        msg = generate_prono_message(course)
-        send_telegram(msg)
+        try:
+            course_time = datetime.strptime(course["heure"], "%H:%M")
+            course_time = france_tz.localize(course_time.replace(
+                year=now_utc.year, month=now_utc.month, day=now_utc.day))
+            course_time_utc = course_time.astimezone(pytz.utc)
+        except:
+            continue
+
+        delta = course_time_utc - now_utc
+        if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
+            msg = generate_prono_message(course)
+            send_telegram(msg)
+            print(f"Envoyé : {course['description']} à {course['heure']}")
 
 if __name__ == "__main__":
     main()

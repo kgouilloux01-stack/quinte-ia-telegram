@@ -1,28 +1,30 @@
-name: Telegram Live Quinté Bot
+name: Run Telegram Bot
 
 on:
-  schedule:
-    - cron: '*/1 * * * *'  # toutes les minutes
-  workflow_dispatch:
+  push:
+    branches:
+      - main  # ou la branche que tu utilises
+  workflow_dispatch:   # permet de lancer le workflow manuellement depuis GitHub
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout du code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Installer Python
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: 3.11  # adapte selon ta version de Python
 
-      - name: Installer les dépendances
+      - name: Install dependencies
         run: |
-          pip install requests
-          pip install beautifulsoup4
-          pip install pytz
+          python -m pip install --upgrade pip
+          pip install python-telegram-bot --upgrade
+          # si tu as d'autres dépendances, ajoute-les ici
+          # ex: pip install requests beautifulsoup4
 
-      - name: Lancer le bot
+      - name: Run bot
         run: python bot_live.py

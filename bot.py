@@ -11,7 +11,7 @@ import time
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 TURFOO_URL = "https://www.turfoo.fr/programmes-courses/"
-
+CHECK_INTERVAL = 60  # secondes entre chaque check
 sent_courses = set()  # éviter les doublons
 
 # =========================
@@ -64,13 +64,11 @@ def get_course_details(course_url):
     hippodrome = "Hippodrome inconnu"
     horses = []
 
-    # Hippodrome
     try:
         hippodrome = soup.select_one("h2.strong").text.strip()
     except:
         pass
 
-    # Chevaux (num + nom)
     try:
         table = soup.select("table.table")[0]
         for row in table.select("tr")[1:]:
@@ -112,30 +110,28 @@ def generate_prono(course):
     return texte
 
 # =========================
-# MAIN 10 MINUTES AVANT
+# BOUCLE PRINCIPALE
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
-    now = datetime.now(tz)
-    courses = get_courses()
-    if not courses:
-        print("Aucune course trouvée !")
-        return
-
-    for course in courses:
-        try:
-            h, m = map(int, course["heure"].split(":"))
-            course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            delta = course_time - now
-            if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-                if course["nom"] not in sent_courses:
-                    msg = generate_prono(course)
-                    if msg:
-                        send_telegram(msg)
-                        sent_courses.add(course["nom"])
-                        print("Envoyé :", course["nom"], course["heure"])
-        except:
-            continue
+    while True:
+        now = datetime.now(tz)
+        courses = get_courses()
+        for course in courses:
+            try:
+                h, m = map(int, course["heure"].split(":"))
+                course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                delta = course_time - now
+                if timedelta(minutes=0) <= delta <= timedelta(minutes=10]:
+                    if course["nom"] not in sent_courses:
+                        msg = generate_prono(course)
+                        if msg:
+                            send_telegram(msg)
+                            sent_courses.add(course["nom"])
+                            print(f"Envoyé : {course['nom']} à {course['heure']}")
+            except:
+                continue
+        time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
     main()

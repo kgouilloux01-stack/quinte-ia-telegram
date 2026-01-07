@@ -1,107 +1,101 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
 import random
-import requests
-import time
 
 # =========================
-# CONFIGURATION
+# CONFIG
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-COINTURF_URL = "https://www.coin-turf.fr/programmes-courses/"
+GENY_URL = "https://www.geny.com/reunions-courses-pmu"
 
 # =========================
-# SELENIUM - Récupérer les courses
+# TELEGRAM
 # =========================
-def get_courses_selenium():
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.binary_location = "/usr/bin/chromium-browser"
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={
+        "chat_id": CHANNEL_ID,
+        "text": message
+    })
 
-    driver = webdriver.Chrome(options=options)
-    driver.get(COINTURF_URL)
+# =========================
+# PRONO IA
+# =========================
+def generate_prono(course_name, heure):
+    horses = []
+    for i in range(1, 17):
+        horses.append({
+            "num": i,
+            "score": random.randint(70, 90)
+        })
 
-    time.sleep(5)
+    horses = sorted(horses, key=lambda x: x["score"], reverse=True)
+
+    msg = f"🤖 PRONOSTIC IA\n"
+    msg += f"🏇 {course_name}\n"
+    msg += f"⏰ Départ : {heure}\n\n"
+
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    for m, h in zip(medals, horses[:5]):
+        msg += f"{m} N°{h['num']} (score {h['score']})\n"
+
+    msg += "\n🔞 Jeu responsable"
+    return msg
+
+# =========================
+# RÉCUPÉRATION DES COURSES
+# =========================
+def get_courses():
+    resp = requests.get(GENY_URL, timeout=10)
+    soup = BeautifulSoup(resp.text, "html.parser")
 
     courses = []
 
-    rows = driver.find_elements(By.CSS_SELECTOR, ".programmeItem")
-    for r in rows:
+    for course in soup.select("div.course"):
         try:
-            code = r.find_element(By.CSS_SELECTOR, ".programmeNum").text.strip()
-            name = r.find_element(By.CSS_SELECTOR, ".programmeNom").text.strip()
-            heure = r.find_element(By.CSS_SELECTOR, ".programmeHeure").text.strip()
+            name = course.select_one(".course-title").get_text(strip=True)
+            heure = course.select_one(".course-hour").get_text(strip=True)
             courses.append({
-                "description": f"{code} {name}",
+                "name": name,
                 "heure": heure
             })
         except:
             continue
 
-    driver.quit()
     return courses
 
 # =========================
-# PRONOSTIC IA
-# =========================
-def compute_scores(n=16):
-    horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, n + 1)]
-    for h in horses:
-        h["score"] = random.randint(70, 90)
-    return sorted(horses, key=lambda x: x["score"], reverse=True)
-
-def generate_prono_message(course):
-    texte = f"🤖 PRONOSTIC IA – {course['description']}\n"
-    texte += f"⏱ Heure : {course['heure']}\n\nTop 5 IA :\n"
-    sorted_horses = compute_scores()
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-    for m, h in zip(medals, sorted_horses[:5]):
-        texte += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
-    return texte
-
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
-
-# =========================
-# MAIN - 10 minutes avant
+# MAIN
 # =========================
 def main():
-    france_tz = pytz.timezone("Europe/Paris")
-    now_utc = datetime.now(pytz.utc)
+    tz = pytz.timezone("Europe/Paris")
+    now = datetime.now(tz)
 
-    courses = get_courses_selenium()
+    courses = get_courses()
     if not courses:
-        print("Aucune course trouvée !")
+        print("Aucune course trouvée")
         return
 
-    sent_courses = set()
-
-    for course in courses:
+    for c in courses:
         try:
-            dt = datetime.strptime(course["heure"], "%H:%M")
-            dt = france_tz.localize(
-                dt.replace(year=now_utc.year, month=now_utc.month, day=now_utc.day)
+            h, m = c["heure"].split(":")
+            course_time = now.replace(
+                hour=int(h),
+                minute=int(m),
+                second=0
             )
-            course_time_utc = dt.astimezone(pytz.utc)
         except:
             continue
 
-        delta = course_time_utc - now_utc
+        delta = course_time - now
 
-        # ✅ LIGNE CORRIGÉE ICI
         if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-            if course["description"] not in sent_courses:
-                msg = generate_prono_message(course)
-                send_telegram(msg)
-                sent_courses.add(course["description"])
-                print(f"Envoyé : {course['description']} à {course['heure']}")
+            msg = generate_prono(c["name"], c["heure"])
+            send_telegram(msg)
+            print("Envoyé :", c["name"], c["heure"])
 
 if __name__ == "__main__":
     main()

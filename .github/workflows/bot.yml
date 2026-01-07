@@ -2,7 +2,7 @@ name: Telegram Courses IA - CoinTurf Selenium
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/5 * * * *'  # toutes les 5 minutes
   workflow_dispatch:
 
 jobs:
@@ -21,10 +21,10 @@ jobs:
         run: |
           pip install requests selenium pytz
 
-      - name: Installer Google Chrome et ChromeDriver
+      - name: Installer Chromium et ChromeDriver
         run: |
           sudo apt update
-          sudo apt install -y google-chrome-stable chromium-chromedriver
+          sudo apt install -y chromium-browser chromium-chromedriver
 
       - name: Lancer le bot
         run: python bot.py

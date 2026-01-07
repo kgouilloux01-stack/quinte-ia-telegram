@@ -1,13 +1,13 @@
 name: Telegram Quinté Bot
 
-# 🔹 Déclenchement automatique toutes les minutes et manuel
+# Toutes les minutes
 on:
   schedule:
-    - cron: "*/1 * * * *"   # toutes les minutes (UTC)
+    - cron: "*/1 * * * *"
   workflow_dispatch:
 
 jobs:
-  run-bot:
+  run:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +24,9 @@ jobs:
       # 3️⃣ Installer les dépendances
       - name: Installer les dépendances
         run: |
-          pip install requests beautifulsoup4 pytz
+          pip install requests
+          pip install beautifulsoup4
+          pip install pytz
 
       # 4️⃣ Lancer le bot
       - name: Lancer le bot

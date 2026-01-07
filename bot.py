@@ -43,9 +43,8 @@ def get_courses():
             heure_span = a.select_one("span.mid-gray").text.strip()
             heure = heure_span.split("•")[0].strip()
             
-            # Nombre de partants
             parts_text = heure_span.split("•")[-1].strip()
-            nb_partants = int(''.join(filter(str.isdigit, parts_text)))  # extrait le nombre
+            nb_partants = int(''.join(filter(str.isdigit, parts_text)))  # nombre de partants
             
             description = f"{code} {nom}"
             courses.append({"nom": description, "heure": heure, "partants": nb_partants})
@@ -55,22 +54,24 @@ def get_courses():
     return courses
 
 # =========================
-# PRONOSTIC IA
+# PRONOSTIC IA (style Quinté IA)
 # =========================
 def generate_prono(nom, heure, nb_partants):
     horses = list(range(1, nb_partants+1))
     random.shuffle(horses)
-    top5 = horses[:min(5, nb_partants)]
+    top3 = horses[:min(3, nb_partants)]
 
-    msg = f"🤖 PRONO IA\n🏇 {nom}\n⏱ {heure}\n\nTop {len(top5)} IA :\n"
-    medals = ["🥇","🥈","🥉","4️⃣","5️⃣"]
-    for m, h in zip(medals, top5):
-        msg += f"{m} N°{h}\n"
-    msg += "\n🔞 Jeu responsable"
+    msg = f"🤖 **LECTURE MACHINE – {nom}**\n"
+    msg += f"⏱ Heure : {heure}\n\nTop 3 IA :\n"
+    medals = ["🥇", "🥈", "🥉"]
+    for m, h in zip(medals, top3):
+        msg += f"{m} N°{h} – Cheval {h}\n"
+
+    msg += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return msg
 
 # =========================
-# MAIN
+# MAIN - 10 minutes avant
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
@@ -86,7 +87,6 @@ def main():
             course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
             delta = course_time - now
 
-            # Envoyer 10 min avant
             if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
                 if course["nom"] not in sent_courses:
                     msg = generate_prono(course["nom"], course["heure"], course["partants"])

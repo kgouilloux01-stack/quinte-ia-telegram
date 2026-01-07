@@ -3,36 +3,29 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
 import random
-import json
-import os
+import time
 
 # =========================
 # CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-URL = "https://www.turfoo.fr/programmes-courses/"
-SENT_FILE = "sent_courses.json"
+TURFOO_URL = "https://www.turfoo.fr/programmes-courses/"
 
-# Charger les courses déjà envoyées
-if os.path.exists(SENT_FILE):
-    with open(SENT_FILE, "r") as f:
-        sent_courses = set(json.load(f))
-else:
-    sent_courses = set()
+sent_courses = set()  # éviter les doublons
 
 # =========================
-# SEND TELEGRAM
+# ENVOI TELEGRAM
 # =========================
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
 
 # =========================
-# SCRAP LES COURSES
+# SCRAP COURSES
 # =========================
 def get_courses():
-    r = requests.get(URL, timeout=10)
+    r = requests.get(TURFOO_URL, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
     courses = []
 
@@ -42,119 +35,107 @@ def get_courses():
             nom = a.select_one("span.myResearch").text.strip()
             heure_span = a.select_one("span.mid-gray").text.strip()
             heure = heure_span.split("•")[0].strip()
-
-            # URL de la course
-            course_url = "https://www.turfoo.fr" + a["href"]
-            courses.append({"nom": f"{code} {nom}", "heure": heure, "url": course_url})
+            # extraire distance et allocation si dispo
+            distance = "Distance inconnue"
+            allocation = "Allocation inconnue"
+            if "•" in heure_span:
+                parts = [p.strip() for p in heure_span.split("•")]
+                if len(parts) >= 2:
+                    distance = parts[1]
+                if len(parts) >= 3:
+                    allocation = parts[2]
+            courses.append({
+                "nom": f"{code} {nom}",
+                "heure": heure,
+                "url": "https://www.turfoo.fr" + a['href'],
+                "distance": distance,
+                "allocation": allocation
+            })
         except:
             continue
-
     return courses
 
 # =========================
-# SCRAP PAGE D'UNE COURSE
+# RÉCUP DÉTAILS CHEVAUX
 # =========================
 def get_course_details(course_url):
     r = requests.get(course_url, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
+    hippodrome = "Hippodrome inconnu"
+    horses = []
 
     # Hippodrome
     try:
-        hippodrome = soup.select_one("div#infosCourse span[itemprop='name']").text.strip()
+        hippodrome = soup.select_one("h2.strong").text.strip()
     except:
-        hippodrome = "Hippodrome inconnu"
+        pass
 
-    # Distance
+    # Chevaux (num + nom)
     try:
-        distance_text = soup.select_one("div#infosCourse span:contains('Distance')").text
-        distance = distance_text.strip()
-    except:
-        distance = "Distance inconnue"
-
-    # Allocation / Prix
-    try:
-        allocation_text = soup.select_one("div#infosCourse span:contains('Allocation')").text
-        allocation = allocation_text.strip()
-    except:
-        allocation = "Allocation inconnue"
-
-    # Chevaux
-    horses = []
-    try:
-        table = soup.select_one("table.table")
-        rows = table.find_all("tr")[1:]  # ignorer header
-        for row in rows:
-            cols = row.find_all("td")
+        table = soup.select("table.table")[0]
+        for row in table.select("tr")[1:]:
+            cols = row.select("td")
             if len(cols) >= 2:
                 num = cols[0].text.strip()
                 name = cols[1].text.strip()
                 horses.append({"num": num, "name": name})
     except:
-        # Si impossible, on crée des chevaux fictifs
-        horses = [{"num": str(i), "name": f"Cheval {i}"} for i in range(1, 17)]
+        pass
 
-    return hippodrome, distance, allocation, horses
+    return hippodrome, horses
 
 # =========================
-# PRONOSTIC IA
+# PRONO TOP 3 IA
 # =========================
-def generate_prono(course, horses):
+def generate_prono(course):
+    hippodrome, horses = get_course_details(course["url"])
+    n_partants = len(horses)
+    if n_partants == 0:
+        return None
+
     for h in horses:
         h["score"] = random.randint(70, 90)
-    sorted_horses = sorted(horses, key=lambda x: x["score"], reverse=True)
-    top3 = sorted_horses[:3]
 
-    msg = f"🤖 **LECTURE MACHINE – {course['nom']}**\n"
-    msg += f"📍 Hippodrome : {course['hippodrome']}\n"
-    msg += f"📏 Distance : {course['distance']}\n"
-    msg += f"💰 {course['allocation']}\n"
-    msg += f"⏱ Heure : {course['heure']}\n\nTop 3 IA :\n"
+    top3 = sorted(horses, key=lambda x: x["score"], reverse=True)[:3]
+
+    texte = f"🤖 **LECTURE MACHINE – {course['nom']}**\n"
+    texte += f"📍 Hippodrome : {hippodrome}\n"
+    texte += f"📏 Distance : {course['distance']}\n"
+    texte += f"💰 Allocation : {course['allocation']}\n"
+    texte += f"⏱ Heure : {course['heure']}\n\nTop 3 IA :\n"
 
     medals = ["🥇", "🥈", "🥉"]
     for m, h in zip(medals, top3):
-        msg += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
+        texte += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
 
-    msg += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
-    return msg
+    texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
+    return texte
 
 # =========================
-# MAIN - 10 minutes avant
+# MAIN 10 MINUTES AVANT
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
     now = datetime.now(tz)
-
     courses = get_courses()
     if not courses:
-        print("Aucune course trouvée")
+        print("Aucune course trouvée !")
         return
 
     for course in courses:
         try:
-            # Récupérer les détails
-            hippodrome, distance, allocation, horses = get_course_details(course["url"])
-            course["hippodrome"] = hippodrome
-            course["distance"] = distance
-            course["allocation"] = allocation
-            course["horses"] = horses
-
-            # Calcul de l'heure
             h, m = map(int, course["heure"].split(":"))
             course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
             delta = course_time - now
-
             if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
                 if course["nom"] not in sent_courses:
-                    msg = generate_prono(course, horses)
-                    send_telegram(msg)
-                    sent_courses.add(course["nom"])
-                    print("Envoyé :", course["nom"], course["heure"])
+                    msg = generate_prono(course)
+                    if msg:
+                        send_telegram(msg)
+                        sent_courses.add(course["nom"])
+                        print("Envoyé :", course["nom"], course["heure"])
         except:
             continue
-
-    # Sauvegarder les courses envoyées
-    with open(SENT_FILE, "w") as f:
-        json.dump(list(sent_courses), f)
 
 if __name__ == "__main__":
     main()

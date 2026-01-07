@@ -1,98 +1,108 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
-import pytz
 import random
-import os
+from datetime import datetime, timedelta
+import pytz
 
 # =========================
 # CONFIG
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-DELAY_BEFORE_RACE = 999  # minutes
-
-SENT_FILE = "sent_live.txt"
+DELAY_BEFORE_RACE = 9999  # Forcer l'envoi immédiat pour test
 
 # =========================
-# UTILS
-# =========================
-def already_sent(race_id):
-    if not os.path.exists(SENT_FILE):
-        return False
-    with open(SENT_FILE, "r") as f:
-        return race_id in f.read()
-
-def mark_sent(race_id):
-    with open(SENT_FILE, "a") as f:
-        f.write(race_id + "\n")
-
-# =========================
-# SCRAP COURSES
+# Récupération courses
 # =========================
 def get_courses():
-    url = "https://www.coin-turf.fr/"
-    html = requests.get(url, timeout=15).text
-    soup = BeautifulSoup(html, "html.parser")
+    url = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
+    resp = requests.get(url)
+    soup = BeautifulSoup(resp.text, "html.parser")
 
-    tz = pytz.timezone("Europe/Paris")
     courses = []
 
-    for bloc in soup.select(".RaceCard"):
-        try:
-            heure_txt = bloc.select_one(".Hour").text.strip()
-            hippodrome = bloc.select_one(".Hippodrome").text.strip()
+    course_sections = soup.find_all("div", {"class": "InfosCourse"})
+    for section in course_sections:
+        allocation, distance = "Allocation inconnue", "Distance inconnue"
+        p = section.find("p")
+        if p:
+            for part in p.text.split(" - "):
+                if "Allocation" in part:
+                    allocation = part.strip()
+                if "Distance" in part:
+                    distance = part.strip()
 
-            now = datetime.now(tz)
-            heure = datetime.strptime(heure_txt, "%Hh%M")
-            heure_depart = now.replace(
-                hour=heure.hour,
-                minute=heure.minute,
-                second=0,
-                microsecond=0
-            )
+        parent = section.find_parent()
+        depart_div = parent.find("div", {"class": "DepartQ"})
+        if depart_div:
+            parts = [p.strip() for p in depart_div.text.split("-")]
+            hippodrome = parts[1].strip() if len(parts) >= 2 else "Hippodrome inconnu"
+            date_str = parts[2].strip() if len(parts) >= 3 else None
+            try:
+                heure_depart = datetime.strptime(date_str, "%d/%m/%Y").replace(hour=15, minute=15)
+                tz = pytz.timezone("Europe/Paris")
+                heure_depart = tz.localize(heure_depart)
+            except:
+                heure_depart = datetime.now(pytz.timezone("Europe/Paris"))
+        else:
+            hippodrome = "Hippodrome inconnu"
+            heure_depart = datetime.now(pytz.timezone("Europe/Paris"))
 
-            if heure_depart < now:
-                heure_depart = heure_depart.replace(day=heure_depart.day + 1)
+        horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
-            race_id = f"{hippodrome}_{heure_txt}"
-
-            courses.append({
-                "id": race_id,
-                "hippodrome": hippodrome,
-                "heure_depart": heure_depart
-            })
-        except:
-            continue
-
+        courses.append({
+            "hippodrome": hippodrome,
+            "heure_depart": heure_depart,
+            "allocation": allocation,
+            "distance": distance,
+            "horses": horses
+        })
+    print("DEBUG COURSES:", courses)  # Vérification courses détectées
     return courses
 
 # =========================
-# MESSAGE
+# Scores IA
+# =========================
+def compute_scores(horses):
+    for h in horses:
+        h["score"] = random.randint(70, 90)
+    return sorted(horses, key=lambda x: x["score"], reverse=True)
+
+# =========================
+# Génération message
 # =========================
 def generate_message(course):
-    chevaux = list(range(1, 17))
-    random.shuffle(chevaux)
-    top3 = chevaux[:3]
+    top5 = compute_scores(course["horses"])[:5]
 
-    txt = "🤖 **LECTURE MACHINE – PRONO LIVE**\n\n"
-    txt += f"📍 Hippodrome : {course['hippodrome']}\n"
-    txt += f"⏰ Départ : {course['heure_depart'].strftime('%H:%M')}\n\n"
-    txt += "🎯 **COUP DU COMPToir IA**\n"
+    texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
+    texte += f"📍 Hippodrome : {course['hippodrome']}\n"
+    texte += f"📅 Date : {course['heure_depart'].strftime('%d/%m/%Y %H:%M')}\n"
+    texte += f"💰 {course['allocation']}\n"
+    texte += f"📏 {course['distance']}\n\n"
+    texte += "👉 Top 5 IA :\n"
 
-    medals = ["🥇", "🥈", "🥉"]
-    for m, n in zip(medals, top3):
-        txt += f"{m} N°{n}\n"
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    for m, h in zip(medals, top5):
+        texte += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
 
-    txt += "\n🔒 Analyse exclusive – @QuinteIA"
-    return txt
+    scores = [h["score"] for h in top5]
+    doute = max(scores) - min(scores) < 5
+    texte += "\n"
+    if doute:
+        texte += "⚠️ **Doutes de la machine** : scores serrés.\n💡 **Avis comptoir** : on couvre.\n"
+    else:
+        texte += "✅ **Lecture claire** : base possible, mais prudence.\n"
+
+    texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
+    return texte
 
 # =========================
-# TELEGRAM
+# Telegram
 # =========================
-def send(msg):
+def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
+    r = requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
+    print("DEBUG TELEGRAM STATUS:", r.status_code)
 
 # =========================
 # MAIN
@@ -100,17 +110,15 @@ def send(msg):
 def main():
     tz = pytz.timezone("Europe/Paris")
     now = datetime.now(tz)
-
     courses = get_courses()
 
-    for c in courses:
-        delta = (c["heure_depart"] - now).total_seconds() / 60
-
-        if 0 <= delta <= DELAY_BEFORE_RACE:
-            if not already_sent(c["id"]):
-                send(generate_message(c))
-                mark_sent(c["id"])
-                print(f"✅ Envoyé : {c['hippodrome']} {c['heure_depart'].strftime('%H:%M')}")
+    for course in courses:
+        delta_minutes = (course["heure_depart"] - now).total_seconds() / 60
+        print(f"DEBUG DELTA ({course['hippodrome']}):", delta_minutes)
+        if 0 <= delta_minutes <= DELAY_BEFORE_RACE:
+            msg = generate_message(course)
+            send_telegram(msg)
+            print(f"✅ Pronostic envoyé pour {course['hippodrome']} à {course['heure_depart'].strftime('%H:%M')}")
 
 if __name__ == "__main__":
     main()

@@ -1,20 +1,3 @@
-C1 Prix De Baleix 13:25 • Plat • 9 Partants  
-C2 Prix Tekide 13:55 • Haies • 16 Partants  
-…
-``` :contentReference[oaicite:2]{index=2}
-
-Donc on va :  
-1. Scraper **Turfoo** pour récupérer toutes les courses du **programme du jour + leurs horaires**  
-2. Filtrer celles qui commencent dans **≤ 10 min**,  
-3. Envoyer un pronostic sur Telegram.  
-
----
-
-## 🐎 Script Python à mettre dans `bot.py`
-
-Copie‑colle **exactement** ce script :
-
-```python
 import requests
 from bs4 import BeautifulSoup
 import random
@@ -37,16 +20,20 @@ def get_turfoo_programme():
     courses = []
 
     try:
-        # Le programme se présente en sections Réunion + liste des courses
-        # On trouve les lignes contenant le numéro de course + nom + heure
+        # Récupère tout le texte et split en lignes
         programme_text = soup.get_text(separator="\n")
         lines = programme_text.split("\n")
 
         for line in lines:
-            # Exemple de ligne valide : "C1 Prix De Baleix 13:25 • Plat • 9 Partants"
-            if "C" in line and ":" in line:
-                parts = line.strip().split()
-                # on cherche une heure avec format HH:MM
+            line = line.strip()
+            if not line:
+                continue
+
+            # Exemple de ligne : "C1 Prix De Baleix 13:25 Plat 9 Partants"
+            # On cherche les lignes avec "C" suivi d'une heure
+            if line.startswith("C") and any(c.isdigit() for c in line):
+                # Recherche de l'heure au format HH:MM
+                parts = line.split()
                 heure = None
                 for p in parts:
                     if ":" in p and p.replace(":", "").isdigit():
@@ -55,18 +42,15 @@ def get_turfoo_programme():
                 if not heure:
                     continue
 
-                # le nom complet (tout avant l'heure)
-                name_parts = []
+                # Description = tout avant l'heure
+                desc_parts = []
                 for p in parts:
                     if p == heure:
                         break
-                    name_parts.append(p)
-                description = " ".join(name_parts).strip()
+                    desc_parts.append(p)
+                description = " ".join(desc_parts)
 
-                courses.append({
-                    "heure": heure,
-                    "description": description
-                })
+                courses.append({"heure": heure, "description": description})
     except Exception as e:
         print("Erreur scraping Turfoo:", e)
 
@@ -114,7 +98,6 @@ def main():
             continue
 
         delta = course_time - now
-        # si la course commence dans les 10 minutes
         if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
             msg = generate_prono_message(course)
             send_telegram(msg)

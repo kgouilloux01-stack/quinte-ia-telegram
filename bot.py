@@ -3,82 +3,89 @@ from bs4 import BeautifulSoup
 import random
 from datetime import datetime, timedelta
 
-# ===== CONFIGURATION =====
+# =====================
+# CONFIGURATION
+# =====================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
-# ===== FONCTIONS =====
-def get_courses_programme():
-    url = "https://www.zone-turf.fr/programmes/"  # page des programmes ZT
+# =====================
+# EXTRACTION DES COURSES DU JOUR
+# =====================
+def get_courses_today():
+    url = "https://www.france-galop.com/fr/courses/aujourdhui"
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     courses = []
-    try:
-        # récupération du tableau
-        rows = soup.find_all("tr")
-        for row in rows[1:]:
-            cols = row.find_all("td")
-            if len(cols) >= 4:
-                # Heure et infos
-                heure = cols[1].text.strip()
-                nom = cols[0].text.strip()
-                distance = cols[2].text.strip()
-                type_course = cols[3].text.strip()
+    # chaque course est contenue dans un bloc qui affiche l'hippodrome et l'horaire
+    blocs = soup.find_all("div", class_="field--name-field-course")  # ajustement selon le HTML
+    for bloc in blocs:
+        try:
+            # Hippodrome
+            hippodrome = bloc.find("h2").get_text(strip=True)
 
-                # Ajoute à la liste
-                courses.append({
-                    "nom": nom,
-                    "heure": heure,
-                    "distance": distance,
-                    "type": type_course
-                })
-    except Exception as e:
-        print("Erreur scraping programme:", e)
+            # Récupérer l'heure (par exemple "15h33")
+            heure_tag = bloc.find("span", class_="field--name-field-course-time")
+            if not heure_tag:
+                continue
+            heure_str = heure_tag.get_text(strip=True)
 
+            # Normaliser heure France Galop en "HH:MM"
+            heure_str = heure_str.replace("h", ":")  # 15h33 -> 15:33
+
+            # Stockage
+            courses.append({"hippodrome": hippodrome, "heure": heure_str})
+        except Exception:
+            continue
     return courses
 
-def compute_scores(horses):
+# =====================
+# GENERATION DU PRONOSTIC
+# =====================
+def compute_scores(num_chevaux=16):
+    horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, num_chevaux+1)]
     for h in horses:
         h["score"] = random.randint(70, 90)
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
-def generate_message(course):
-    texte = "🤖 **PRONOSTIC MACHINE – COURSE À VENIR**\n\n"
-    texte += f"🏁 Course : {course['nom']}\n"
-    texte += f"⏱️ Heure : {course['heure']}\n"
-    texte += f"📏 Distance : {course['distance']}\n"
-    texte += f"📍 Type : {course['type']}\n\n"
-    texte += "👉 **Pronostic IA simplifié** :\n"
-    # Simulation random de résultats
-    horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
-    sorted_horses = compute_scores(horses)
+def generate_prono_message(hippodrome, heure, sorted_horses):
+    texte = "🤖 **PRONOSTIC IA – COURSE À VENIR**\n"
+    texte += f"📍 Hippodrome : {hippodrome}\n"
+    texte += f"⏱️ Heure : {heure}\n\n"
+    texte += "👉 Top 5 IA :\n"
+
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
     for m, h in zip(medals, sorted_horses[:5]):
         texte += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
 
-    texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
+    texte += "\n🔞 Jeu responsable – pronostic algorithmique, aucun gain garanti."
     return texte
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
-# ===== MAIN =====
+# =====================
+# MAIN
+# =====================
 def main():
     now = datetime.now()
-    courses = get_courses_programme()
+    courses = get_courses_today()
 
-    for c in courses:
+    for course in courses:
         try:
-            course_time = datetime.strptime(c["heure"], "%Hh%M")
+            # convertir heure "HH:MM"
+            course_time = datetime.strptime(course["heure"], "%H:%M")
             course_time = course_time.replace(year=now.year, month=now.month, day=now.day)
         except:
             continue
 
-        # envoyer 10 min avant
-        if timedelta(minutes=0) <= (course_time - now) <= timedelta(minutes=10):
-            message = generate_message(c)
+        # Si la course commence dans <= 10 minutes
+        diff = course_time - now
+        if timedelta(minutes=0) <= diff <= timedelta(minutes=10):
+            sorted_horses = compute_scores()
+            message = generate_prono_message(course["hippodrome"], course["heure"], sorted_horses)
             send_telegram(message)
 
 if __name__ == "__main__":

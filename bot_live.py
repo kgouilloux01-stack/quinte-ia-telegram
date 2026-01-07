@@ -1,6 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import random
 
 # =========================
@@ -8,80 +8,71 @@ import random
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # ton canal Telegram
-UTC_OFFSET = 1  # France UTC+1, 2 en été
+UTC_OFFSET = 1  # Heure France (UTC+1)
 
 # =========================
-# RÉCUPÉRATION DES COURSES
+# RÉCUPÉRATION DES COURSES DU JOUR
 # =========================
-def get_courses():
+def get_quinte_info():
     url = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
+
     courses = []
 
-    # Trouver toutes les courses dans la page
-    bare_courses = soup.find_all("div", class_="bare-course-Quinte")
-    for bare in bare_courses:
-        liens = bare.find_all("a")
-        for lien in liens:
-            # Heure et hippodrome dans la page du lien
-            course_url = "https://www.coin-turf.fr" + lien.get("href")
-            course_resp = requests.get(course_url)
-            course_soup = BeautifulSoup(course_resp.text, "html.parser")
+    # Pour chaque course trouvée
+    course_sections = soup.find_all("div", class_="ContentResultQ")
+    for section in course_sections:
+        try:
+            # Hippodrome et date
+            depart_div = section.find("div", class_="DepartQ")
+            parts = [p.strip() for p in depart_div.text.split("-")]
+            hippodrome = parts[1].strip() if len(parts) >= 2 else "Hippodrome inconnu"
+            date_course = parts[2].strip() if len(parts) >= 3 else "Date inconnue"
 
-            # ===== Hippodrome et date =====
-            hippodrome = "Hippodrome inconnu"
-            date_course = "Date inconnue"
-            heure_depart = None
-            depart_div = course_soup.find("div", {"class": "DepartQ"})
-            if depart_div:
-                parts = [p.strip() for p in depart_div.text.split("-")]
-                if len(parts) >= 3:
-                    hippodrome = parts[1].strip()
-                    date_course = parts[2].strip()
-                    # Récup heure départ (ex: "Depart à 15h15")
-                    heure_text = parts[0].replace("Depart à", "").strip()
-                    try:
-                        h, m = map(int, heure_text.split("h"))
-                        heure_depart = datetime.strptime(date_course, "%d/%m/%Y")
-                        heure_depart = heure_depart.replace(hour=h, minute=m)
-                    except:
-                        pass
-
-            # ===== Allocation et distance =====
-            allocation = "Allocation inconnue"
-            distance = "Distance inconnue"
-            info_p = course_soup.find("div", {"class": "InfosCourse"})
+            # Allocation et distance
+            info_p = section.find("div", class_="InfosCourse").find("p")
+            allocation = distance = "Inconnu"
             if info_p:
-                parts = info_p.find("p").text.split(" - ")
-                for p in parts:
+                for p in info_p.text.split(" - "):
                     if "Allocation" in p:
                         allocation = p.strip()
                     if "Distance" in p:
                         distance = p.strip()
 
-            # ===== Chevaux =====
+            # Heure départ
+            # Exemple : "Depart à 15h15"
+            heure_str = depart_div.text.split("Depart à")[-1].split("-")[0].strip()
+            heure_depart = datetime.strptime(f"{date_course} {heure_str}", "%d/%m/%Y %Hh%M")
+
+            # Chevaux
             horses = []
-            try:
-                table = course_soup.find("table", {"class": "table"})
-                rows = table.find_all("tr")[1:]  # skip header
+            table = section.find("table", {"class": "table"})
+            if table:
+                rows = table.find_all("tr")[1:]
                 for row in rows:
                     cols = row.find_all("td")
                     if len(cols) >= 2:
                         num = cols[0].text.strip()
                         name = cols[1].text.strip()
                         horses.append({"num": num, "name": name})
-            except:
+                    else:
+                        num = cols[0].text.strip()
+                        horses.append({"num": num, "name": f"Cheval {num}"})
+            else:
+                # fallback si pas de table
                 horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
             courses.append({
                 "hippodrome": hippodrome,
-                "date": date_course,
-                "heure_depart": heure_depart,
+                "date_course": date_course,
                 "allocation": allocation,
                 "distance": distance,
+                "heure_depart": heure_depart,
                 "horses": horses
             })
+        except:
+            continue
     return courses
 
 # =========================
@@ -96,10 +87,12 @@ def compute_scores(horses):
 # GÉNÉRATION DU MESSAGE
 # =========================
 def generate_message(course):
-    top5 = compute_scores(course["horses"])[:5]
+    sorted_horses = compute_scores(course["horses"])
+    top5 = sorted_horses[:5]
+
     texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
     texte += f"📍 Hippodrome : {course['hippodrome']}\n"
-    texte += f"📅 Date : {course['date']}\n"
+    texte += f"📅 Date : {course['date_course']}\n"
     texte += f"💰 {course['allocation']}\n"
     texte += f"📏 {course['distance']}\n\n"
     texte += "👉 Top 5 IA :\n"
@@ -118,6 +111,7 @@ def generate_message(course):
 
     texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.\n"
     texte += "🔒 Analyse exclusive – @QuinteIA"
+
     return texte
 
 # =========================
@@ -131,18 +125,23 @@ def send_telegram(message):
 # MAIN
 # =========================
 def main():
-    now_utc = datetime.now(timezone.utc)
-    now_fr = now_utc + timedelta(hours=UTC_OFFSET)
+    courses = get_quinte_info()
+    now_fr = datetime.utcnow() + timedelta(hours=UTC_OFFSET)  # naive datetime
 
-    courses = get_courses()
     for course in courses:
-        if not course["heure_depart"]:
-            continue
-        delta_minutes = (course["heure_depart"] - now_fr).total_seconds() / 60
-        if 0 <= delta_minutes <= 10:  # poster 10 min avant départ
+        heure_depart = course["heure_depart"]
+        # Assurer datetime naive
+        if heure_depart.tzinfo is not None:
+            heure_depart = heure_depart.replace(tzinfo=None)
+
+        delta_minutes = (heure_depart - now_fr).total_seconds() / 60
+
+        if 0 <= delta_minutes <= 10:  # 10 minutes avant départ
             message = generate_message(course)
             send_telegram(message)
-            print(f"✅ Pronostic envoyé pour {course['hippodrome']} à {course['heure_depart']}")
+            print(f"✅ Pronostic envoyé pour {course['hippodrome']} à {course['heure_depart'].strftime('%H:%M')}")
+        else:
+            print(f"⏳ Prochaine course {course['hippodrome']} dans {int(delta_minutes)} min")
 
 if __name__ == "__main__":
     main()

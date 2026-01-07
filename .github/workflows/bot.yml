@@ -1,8 +1,8 @@
-name: Telegram Courses IA - ZEturf
+name: Telegram Courses IA - Turfoo
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # toutes les 5 min
+    - cron: '*/5 * * * *'   # toutes les 5 minutes
   workflow_dispatch:
 
 jobs:

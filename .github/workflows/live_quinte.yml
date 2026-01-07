@@ -1,23 +1,30 @@
-name: Telegram Live Quinté
+name: Bot Live QuinteIA
 
 on:
   schedule:
-    - cron: "* * * * *"   # toutes les minutes
-  workflow_dispatch:
+    - cron: "*/1 * * * *"  # toutes les minutes
+  workflow_dispatch:  # permet de lancer manuellement
 
 jobs:
-  run:
+  live:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install deps
-        run: pip install requests beautifulsoup4 pytz
+      - name: Install dependencies
+        run: |
+          pip install python-telegram-bot --upgrade
+          pip install requests beautifulsoup4
 
       - name: Run bot
-        run: python bot_live.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+        run: |
+          python bot_live.py

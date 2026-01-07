@@ -10,7 +10,7 @@ import os
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-DELAY_BEFORE_RACE = 10  # minutes
+DELAY_BEFORE_RACE = 999  # minutes
 
 SENT_FILE = "sent_live.txt"
 

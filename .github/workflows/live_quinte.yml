@@ -2,7 +2,7 @@ name: Telegram Live Quinté Bot
 
 on:
   schedule:
-    - cron: '*/1 * * * *'  # vérifie toutes les minutes
+    - cron: '*/1 * * * *' # toutes les minutes pour détecter les courses
   workflow_dispatch:
 
 jobs:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout du code
         uses: actions/checkout@v4
 
       - name: Installer Python
@@ -18,10 +18,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installer dépendances
+      - name: Installer les dépendances
         run: |
-          pip install requests
-          pip install beautifulsoup4
+          pip install requests beautifulsoup4
 
-      - name: Lancer bot live
+      - name: Lancer le bot
         run: python bot_live.py

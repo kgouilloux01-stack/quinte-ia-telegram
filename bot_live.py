@@ -1,30 +1,80 @@
 import requests
-from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 import random
+from datetime import datetime, timedelta
+import pytz
+import time
 
 # =========================
 # CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # ton canal Telegram
+CHANNEL_ID = -1003505856903  # Canal QuinteIA
+DELAY_BEFORE_RACE = 10  # minutes avant le départ
 
 # =========================
-# SIMULATION D'UNE COURSE DANS 10 MINUTES
+# RÉCUPÉRATION DES COURSES DU JOUR
 # =========================
-def get_test_course():
-    now = datetime.utcnow() + timedelta(hours=1)  # UTC+1
-    course = {
-        "hippodrome": "Test Hippodrome",
-        "date_course": now.strftime("%d/%m/%Y"),
-        "allocation": "Allocation: 50000€",
-        "distance": "Distance: 2100 mètres",
-        "heure_depart": now + timedelta(minutes=10),  # 10 min dans le futur
-        "horses": [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
-    }
-    return course
+def get_courses():
+    url = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
+    resp = requests.get(url)
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    courses = []
+    try:
+        # Chaque course est dans un div avec InfosCourse
+        course_sections = soup.find_all("div", {"class": "InfosCourse"})
+        for section in course_sections:
+            # Hippodrome, Allocation, Distance
+            allocation, distance = "Allocation inconnue", "Distance inconnue"
+            p = section.find("p")
+            if p:
+                for part in p.text.split(" - "):
+                    if "Allocation" in part:
+                        allocation = part.strip()
+                    if "Distance" in part:
+                        distance = part.strip()
+
+            # Heure départ et hippodrome
+            parent = section.find_parent()
+            depart_div = parent.find("div", {"class": "DepartQ"})
+            if depart_div:
+                parts = [p.strip() for p in depart_div.text.split("-")]
+                if len(parts) >= 3:
+                    hippodrome = parts[1].strip()
+                    date_str = parts[2].strip()
+                    try:
+                        heure_depart = datetime.strptime(date_str, "%d/%m/%Y")
+                        # On suppose 15h15 par défaut sinon il faut parser l'heure exacte
+                        heure_depart = heure_depart.replace(hour=15, minute=15)
+                        # Fuseau horaire France
+                        tz = pytz.timezone("Europe/Paris")
+                        heure_depart = tz.localize(heure_depart)
+                    except:
+                        heure_depart = datetime.now(pytz.timezone("Europe/Paris"))
+                else:
+                    hippodrome = "Hippodrome inconnu"
+                    heure_depart = datetime.now(pytz.timezone("Europe/Paris"))
+            else:
+                hippodrome = "Hippodrome inconnu"
+                heure_depart = datetime.now(pytz.timezone("Europe/Paris"))
+
+            # Chevaux fictifs (pour test IA)
+            horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
+
+            courses.append({
+                "hippodrome": hippodrome,
+                "heure_depart": heure_depart,
+                "allocation": allocation,
+                "distance": distance,
+                "horses": horses
+            })
+    except Exception as e:
+        print("Erreur récupération courses:", e)
+    return courses
 
 # =========================
-# CALCUL SCORE IA SIMPLIFIÉ
+# CALCUL DES SCORES IA
 # =========================
 def compute_scores(horses):
     for h in horses:
@@ -35,12 +85,11 @@ def compute_scores(horses):
 # GÉNÉRATION DU MESSAGE
 # =========================
 def generate_message(course):
-    sorted_horses = compute_scores(course["horses"])
-    top5 = sorted_horses[:5]
+    top5 = compute_scores(course["horses"])[:5]
 
     texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
     texte += f"📍 Hippodrome : {course['hippodrome']}\n"
-    texte += f"📅 Date : {course['date_course']}\n"
+    texte += f"📅 Date : {course['heure_depart'].strftime('%d/%m/%Y %H:%M')}\n"
     texte += f"💰 {course['allocation']}\n"
     texte += f"📏 {course['distance']}\n\n"
     texte += "👉 Top 5 IA :\n"
@@ -57,9 +106,7 @@ def generate_message(course):
     else:
         texte += "✅ **Lecture claire** : base possible, mais prudence.\n"
 
-    texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.\n"
-    texte += "🔒 Analyse exclusive – @QuinteIA"
-
+    texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return texte
 
 # =========================
@@ -67,21 +114,22 @@ def generate_message(course):
 # =========================
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    resp = requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
-    print(resp.text)
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
 # =========================
-# MAIN
+# MAIN LIVE
 # =========================
 def main():
-    course = get_test_course()
-    now_fr = datetime.utcnow() + timedelta(hours=1)  # UTC+1
-    delta_minutes = (course["heure_depart"] - now_fr).total_seconds() / 60
-    print(f"⏳ Course simulée dans {int(delta_minutes)} minutes")
-    # Forcer l'envoi comme si c'était dans 10 min
-    message = generate_message(course)
-    send_telegram(message)
-    print("✅ Message test envoyé !")
+    tz = pytz.timezone("Europe/Paris")
+    now = datetime.now(tz)
+    courses = get_courses()
+
+    for course in courses:
+        delta_minutes = (course["heure_depart"] - now).total_seconds() / 60
+        if 0 <= delta_minutes <= DELAY_BEFORE_RACE:
+            msg = generate_message(course)
+            send_telegram(msg)
+            print(f"✅ Pronostic envoyé pour {course['hippodrome']} à {course['heure_depart'].strftime('%H:%M')}")
 
 if __name__ == "__main__":
     main()

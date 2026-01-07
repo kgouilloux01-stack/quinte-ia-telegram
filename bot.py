@@ -1,5 +1,4 @@
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
 import random
@@ -9,22 +8,20 @@ import random
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-GENY_URL = "https://www.geny.com/reunions-courses-pmu"
+
+TURFOO_API = "https://www.turfoo.fr/api/programs"
 
 # =========================
 # TELEGRAM
 # =========================
-def send_telegram(message):
+def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={
-        "chat_id": CHANNEL_ID,
-        "text": message
-    })
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
 
 # =========================
 # PRONO IA
 # =========================
-def generate_prono(course_name, heure):
+def generate_prono(course):
     horses = []
     for i in range(1, 17):
         horses.append({
@@ -34,9 +31,12 @@ def generate_prono(course_name, heure):
 
     horses = sorted(horses, key=lambda x: x["score"], reverse=True)
 
-    msg = f"🤖 PRONOSTIC IA\n"
-    msg += f"🏇 {course_name}\n"
-    msg += f"⏰ Départ : {heure}\n\n"
+    msg = (
+        f"🤖 PRONOSTIC IA\n"
+        f"🏇 {course['race_name']}\n"
+        f"📍 {course['hippodrome']}\n"
+        f"⏰ Départ : {course['hour']}\n\n"
+    )
 
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
     for m, h in zip(medals, horses[:5]):
@@ -46,56 +46,35 @@ def generate_prono(course_name, heure):
     return msg
 
 # =========================
-# RÉCUPÉRATION DES COURSES
-# =========================
-def get_courses():
-    resp = requests.get(GENY_URL, timeout=10)
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    courses = []
-
-    for course in soup.select("div.course"):
-        try:
-            name = course.select_one(".course-title").get_text(strip=True)
-            heure = course.select_one(".course-hour").get_text(strip=True)
-            courses.append({
-                "name": name,
-                "heure": heure
-            })
-        except:
-            continue
-
-    return courses
-
-# =========================
 # MAIN
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
     now = datetime.now(tz)
 
-    courses = get_courses()
-    if not courses:
-        print("Aucune course trouvée")
-        return
+    data = requests.get(TURFOO_API, timeout=10).json()
 
-    for c in courses:
-        try:
-            h, m = c["heure"].split(":")
-            course_time = now.replace(
-                hour=int(h),
-                minute=int(m),
-                second=0
-            )
-        except:
-            continue
+    for meeting in data["meetings"]:
+        hippodrome = meeting["name"]
 
-        delta = course_time - now
+        for race in meeting["races"]:
+            hour = race["hour"]  # "14:20"
+            race_name = race["name"]
 
-        if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-            msg = generate_prono(c["name"], c["heure"])
-            send_telegram(msg)
-            print("Envoyé :", c["name"], c["heure"])
+            h, m = hour.split(":")
+            race_time = now.replace(hour=int(h), minute=int(m), second=0)
+
+            delta = race_time - now
+
+            if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
+                course = {
+                    "race_name": race_name,
+                    "hippodrome": hippodrome,
+                    "hour": hour
+                }
+                msg = generate_prono(course)
+                send_telegram(msg)
+                print("Envoyé :", race_name, hour)
 
 if __name__ == "__main__":
     main()

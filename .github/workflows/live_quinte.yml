@@ -2,7 +2,7 @@ name: Telegram Live Quinté Bot
 
 on:
   schedule:
-    - cron: '*/1 * * * *' # toutes les minutes pour détecter les courses
+    - cron: '*/5 * * * *'  # toutes les 5 minutes pour détecter les courses en cours
   workflow_dispatch:
 
 jobs:

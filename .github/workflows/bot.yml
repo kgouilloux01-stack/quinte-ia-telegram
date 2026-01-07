@@ -1,4 +1,28 @@
+name: Telegram Turfoo Bot
+
 on:
   schedule:
     - cron: '*/1 * * * *'  # toutes les minutes
   workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer les dépendances
+        run: |
+          pip install requests
+          pip install beautifulsoup4
+          pip install pytz
+
+      - name: Lancer le bot
+        run: python bot.py

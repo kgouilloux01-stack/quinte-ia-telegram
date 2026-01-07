@@ -2,7 +2,7 @@ name: Telegram Courses IA - ZEturf
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # toutes les 5 minutes
+    - cron: '*/5 * * * *'  # toutes les 5 min
   workflow_dispatch:
 
 jobs:
@@ -16,9 +16,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Installer dépendances
-        run: |
-          pip install requests beautifulsoup4
+      - run: pip install requests beautifulsoup4
 
-      - name: Lancer le bot
-        run: python bot.py
+      - run: python bot.py

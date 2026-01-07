@@ -1,9 +1,8 @@
-name: Telegram Quinté Bot
+name: Telegram Courses IA
 
-# Lancer automatiquement tous les jours à 8h FR
 on:
   schedule:
-    - cron: '7 7 * * *' # 8h France = 7h UTC (hiver)
+    - cron: '*/10 * * * *' # toutes les 10 minutes
   workflow_dispatch:
 
 jobs:
@@ -11,22 +10,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Récupérer le code
       - name: Checkout du code
         uses: actions/checkout@v4
 
-      # 2️⃣ Installer Python
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3️⃣ Installer les dépendances
-      - name: Installer les dépendances
+      - name: Installer dépendances
         run: |
           pip install requests
           pip install beautifulsoup4
 
-      # 4️⃣ Lancer le bot
-      - name: Lancer le bot Telegram
+      - name: Lancer le bot
         run: python bot.py

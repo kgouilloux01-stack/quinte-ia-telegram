@@ -10,18 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout du code
-        uses: actions/checkout@v4
-
-      - name: Installer Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Installer dépendances
-        run: |
-          pip install requests
-          pip install beautifulsoup4
-
-      - name: Lancer le bot
-        run: python bot.py
+      - run: pip install requests beautifulsoup4
+      - run: python bot.py

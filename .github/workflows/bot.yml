@@ -1,33 +1,4 @@
-name: Telegram Quinté Bot
-
-# Toutes les minutes
 on:
   schedule:
-    - cron: "*/1 * * * *"
+    - cron: '*/1 * * * *'  # toutes les minutes
   workflow_dispatch:
-
-jobs:
-  run:
-    runs-on: ubuntu-latest
-
-    steps:
-      # 1️⃣ Récupérer ton code
-      - name: Checkout du code
-        uses: actions/checkout@v4
-
-      # 2️⃣ Installer Python
-      - name: Installer Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      # 3️⃣ Installer les dépendances
-      - name: Installer les dépendances
-        run: |
-          pip install requests
-          pip install beautifulsoup4
-          pip install pytz
-
-      # 4️⃣ Lancer le bot
-      - name: Lancer le bot
-        run: python bot.py

@@ -1,16 +1,19 @@
+### 📌 `bot.py`
+
+```python
 import requests
 from bs4 import BeautifulSoup
 import random
 from datetime import datetime, timedelta
 
 # =========================
-# CONFIGURATION DIRECTE
+# CONFIGURATION
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # ton canal Telegram
+CHANNEL_ID = -1003505856903
 
 # =========================
-# SCRAPING TURFOO PROGRAMME
+# SCRAPING TURFOO
 # =========================
 def get_turfoo_programme():
     url = "https://www.turfoo.fr/programmes-courses/"
@@ -18,46 +21,42 @@ def get_turfoo_programme():
     soup = BeautifulSoup(resp.text, "html.parser")
 
     courses = []
+    text = soup.get_text(separator="\n")
 
-    try:
-        # Récupère tout le texte et split en lignes
-        programme_text = soup.get_text(separator="\n")
-        lines = programme_text.split("\n")
+    # On split chaque ligne du texte
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
 
-        for line in lines:
-            line = line.strip()
-            if not line:
+        # On ne garde que les lignes qui commencent par "C" suivi d'un chiffre
+        # et qui contiennent une heure au format HH:MM
+        if line.startswith("C") and ":" in line:
+            parts = line.split()
+            heure = None
+            for p in parts:
+                if ":" in p and p.replace(":", "").isdigit():
+                    heure = p
+                    break
+            if not heure:
                 continue
 
-            # Exemple de ligne : "C1 Prix De Baleix 13:25 Plat 9 Partants"
-            # On cherche les lignes avec "C" suivi d'une heure
-            if line.startswith("C") and any(c.isdigit() for c in line):
-                # Recherche de l'heure au format HH:MM
-                parts = line.split()
-                heure = None
-                for p in parts:
-                    if ":" in p and p.replace(":", "").isdigit():
-                        heure = p
-                        break
-                if not heure:
-                    continue
+            # TOUT ce qui vient avant l'heure est la description
+            desc_parts = []
+            for p in parts:
+                if p == heure:
+                    break
+                desc_parts.append(p)
+            description = " ".join(desc_parts).strip()
 
-                # Description = tout avant l'heure
-                desc_parts = []
-                for p in parts:
-                    if p == heure:
-                        break
-                    desc_parts.append(p)
-                description = " ".join(desc_parts)
-
-                courses.append({"heure": heure, "description": description})
-    except Exception as e:
-        print("Erreur scraping Turfoo:", e)
-
+            courses.append({
+                "heure": heure,
+                "description": description
+            })
     return courses
 
 # =========================
-# PRONOSTIC IA SIMPLIFIÉ
+# PRONOSTIC IA
 # =========================
 def compute_scores(n=16):
     horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, n+1)]
@@ -70,13 +69,11 @@ def generate_prono_message(course):
     texte += f"📍 {course['description']}\n"
     texte += f"⏱️ Heure : {course['heure']}\n\n"
     texte += "👉 Top 5 IA :\n"
-
     sorted_horses = compute_scores()
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
     for m, h in zip(medals, sorted_horses[:5]):
         texte += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
-
-    texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
+    texte += "\n🔞 Jeu responsable – aucun gain garanti."
     return texte
 
 def send_telegram(message):

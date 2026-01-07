@@ -10,7 +10,7 @@ import time
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # Canal QuinteIA
-DELAY_BEFORE_RACE = 10  # minutes avant le départ
+DELAY_BEFORE_RACE = 999  # minutes avant le départ
 
 # =========================
 # RÉCUPÉRATION DES COURSES DU JOUR

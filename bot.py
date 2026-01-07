@@ -1,10 +1,18 @@
 import requests
 from bs4 import BeautifulSoup
 import random
+from datetime import datetime, timedelta
+import pytz  # pour gérer les fuseaux horaires
 
+# =========================
+# CONFIGURATION
+# =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
+# =========================
+# SCRAP TURFOO
+# =========================
 def get_turfoo_programme():
     url = "https://www.turfoo.fr/programmes-courses/"
     resp = requests.get(url)
@@ -33,6 +41,9 @@ def get_turfoo_programme():
             courses.append({"heure": heure, "description": description})
     return courses
 
+# =========================
+# PRONOSTIC IA
+# =========================
 def compute_scores(n=16):
     horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, n+1)]
     for h in horses:
@@ -51,14 +62,34 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
+# =========================
+# MAIN – 10 MIN AVANT
+# =========================
 def main():
+    now_utc = datetime.now(pytz.utc)
+    france_tz = pytz.timezone("Europe/Paris")
+
     courses = get_turfoo_programme()
     if not courses:
         print("Aucune course trouvée !")
         return
+
     for course in courses:
-        msg = generate_prono_message(course)
-        send_telegram(msg)
+        try:
+            # Heure Turfoo = CET/CEST
+            course_time = datetime.strptime(course["heure"], "%H:%M")
+            course_time = france_tz.localize(course_time.replace(
+                year=now_utc.year, month=now_utc.month, day=now_utc.day))
+            # Convertir en UTC pour comparaison avec le serveur
+            course_time_utc = course_time.astimezone(pytz.utc)
+        except:
+            continue
+
+        delta = course_time_utc - now_utc
+        if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
+            msg = generate_prono_message(course)
+            send_telegram(msg)
+            print(f"Envoyé : {course['description']} à {course['heure']}")
 
 if __name__ == "__main__":
     main()

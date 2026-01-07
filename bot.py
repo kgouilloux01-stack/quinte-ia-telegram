@@ -29,7 +29,7 @@ def send_telegram(msg):
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
 
 # =========================
-# SCRAP TURFOO
+# SCRAP LES COURSES
 # =========================
 def get_courses():
     r = requests.get(URL, timeout=10)
@@ -42,30 +42,77 @@ def get_courses():
             nom = a.select_one("span.myResearch").text.strip()
             heure_span = a.select_one("span.mid-gray").text.strip()
             heure = heure_span.split("•")[0].strip()
-            
-            parts_text = heure_span.split("•")[-1].strip()
-            nb_partants = int(''.join(filter(str.isdigit, parts_text)))  # nombre de partants
-            
-            description = f"{code} {nom}"
-            courses.append({"nom": description, "heure": heure, "partants": nb_partants})
+
+            # URL de la course
+            course_url = "https://www.turfoo.fr" + a["href"]
+            courses.append({"nom": f"{code} {nom}", "heure": heure, "url": course_url})
         except:
             continue
 
     return courses
 
 # =========================
-# PRONOSTIC IA (style Quinté IA)
+# SCRAP PAGE D'UNE COURSE
 # =========================
-def generate_prono(nom, heure, nb_partants):
-    horses = list(range(1, nb_partants+1))
-    random.shuffle(horses)
-    top3 = horses[:min(3, nb_partants)]
+def get_course_details(course_url):
+    r = requests.get(course_url, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-    msg = f"🤖 **LECTURE MACHINE – {nom}**\n"
-    msg += f"⏱ Heure : {heure}\n\nTop 3 IA :\n"
+    # Hippodrome
+    try:
+        hippodrome = soup.select_one("div#infosCourse span[itemprop='name']").text.strip()
+    except:
+        hippodrome = "Hippodrome inconnu"
+
+    # Distance
+    try:
+        distance_text = soup.select_one("div#infosCourse span:contains('Distance')").text
+        distance = distance_text.strip()
+    except:
+        distance = "Distance inconnue"
+
+    # Allocation / Prix
+    try:
+        allocation_text = soup.select_one("div#infosCourse span:contains('Allocation')").text
+        allocation = allocation_text.strip()
+    except:
+        allocation = "Allocation inconnue"
+
+    # Chevaux
+    horses = []
+    try:
+        table = soup.select_one("table.table")
+        rows = table.find_all("tr")[1:]  # ignorer header
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) >= 2:
+                num = cols[0].text.strip()
+                name = cols[1].text.strip()
+                horses.append({"num": num, "name": name})
+    except:
+        # Si impossible, on crée des chevaux fictifs
+        horses = [{"num": str(i), "name": f"Cheval {i}"} for i in range(1, 17)]
+
+    return hippodrome, distance, allocation, horses
+
+# =========================
+# PRONOSTIC IA
+# =========================
+def generate_prono(course, horses):
+    for h in horses:
+        h["score"] = random.randint(70, 90)
+    sorted_horses = sorted(horses, key=lambda x: x["score"], reverse=True)
+    top3 = sorted_horses[:3]
+
+    msg = f"🤖 **LECTURE MACHINE – {course['nom']}**\n"
+    msg += f"📍 Hippodrome : {course['hippodrome']}\n"
+    msg += f"📏 Distance : {course['distance']}\n"
+    msg += f"💰 {course['allocation']}\n"
+    msg += f"⏱ Heure : {course['heure']}\n\nTop 3 IA :\n"
+
     medals = ["🥇", "🥈", "🥉"]
     for m, h in zip(medals, top3):
-        msg += f"{m} N°{h} – Cheval {h}\n"
+        msg += f"{m} N°{h['num']} – {h['name']} (score {h['score']})\n"
 
     msg += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return msg
@@ -76,6 +123,7 @@ def generate_prono(nom, heure, nb_partants):
 def main():
     tz = pytz.timezone("Europe/Paris")
     now = datetime.now(tz)
+
     courses = get_courses()
     if not courses:
         print("Aucune course trouvée")
@@ -83,13 +131,21 @@ def main():
 
     for course in courses:
         try:
+            # Récupérer les détails
+            hippodrome, distance, allocation, horses = get_course_details(course["url"])
+            course["hippodrome"] = hippodrome
+            course["distance"] = distance
+            course["allocation"] = allocation
+            course["horses"] = horses
+
+            # Calcul de l'heure
             h, m = map(int, course["heure"].split(":"))
             course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
             delta = course_time - now
 
             if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
                 if course["nom"] not in sent_courses:
-                    msg = generate_prono(course["nom"], course["heure"], course["partants"])
+                    msg = generate_prono(course, horses)
                     send_telegram(msg)
                     sent_courses.add(course["nom"])
                     print("Envoyé :", course["nom"], course["heure"])

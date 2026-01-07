@@ -16,7 +16,6 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # Hippodrome et date
     hippodrome = "Hippodrome inconnu"
     date_course = "Date inconnue"
     try:
@@ -29,7 +28,6 @@ def get_quinte_info():
     except:
         pass
 
-    # Allocation et distance
     allocation = "Allocation inconnue"
     distance = "Distance inconnue"
     try:
@@ -44,11 +42,10 @@ def get_quinte_info():
     except:
         pass
 
-    # Chevaux et numéros
     horses = []
     try:
         table = soup.find("table", {"class": "table"})
-        rows = table.find_all("tr")[1:]  # skip header
+        rows = table.find_all("tr")[1:]
         for row in rows:
             cols = row.find_all("td")
             if len(cols) >= 2:
@@ -63,17 +60,11 @@ def get_quinte_info():
 
     return hippodrome, date_course, allocation, distance, horses
 
-# =========================
-# CALCUL SCORE IA SIMPLIFIÉ
-# =========================
 def compute_scores(horses):
     for h in horses:
         h["score"] = random.randint(70, 90)
     return sorted(horses, key=lambda x: x["score"], reverse=True)
 
-# =========================
-# GÉNÉRATION DU MESSAGE
-# =========================
 def generate_message(hippodrome, date_course, allocation, distance, sorted_horses):
     top5 = sorted_horses[:5]
     texte = "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
@@ -99,16 +90,10 @@ def generate_message(hippodrome, date_course, allocation, distance, sorted_horse
     texte += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return texte
 
-# =========================
-# ENVOI TELEGRAM
-# =========================
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": CHANNEL_ID, "text": message})
 
-# =========================
-# MAIN
-# =========================
 def main():
     hippodrome, date_course, allocation, distance, horses = get_quinte_info()
     sorted_horses = compute_scores(horses)

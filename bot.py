@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import random
 
 # =========================
-# CONFIGURATION
+# CONFIGURATION (directe)
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # ton canal Telegram
@@ -24,10 +24,10 @@ def get_quinte_info():
         if depart_div:
             parts = [p.strip() for p in depart_div.text.split("-")]
             if len(parts) >= 3:
-                hippodrome = parts[1].strip()  # Vincennes
-                date_course = parts[2].strip() # 04/01/2026
-    except:
-        pass
+                hippodrome = parts[1].strip()
+                date_course = parts[2].strip()
+    except Exception as e:
+        print(f"Erreur récupération hippodrome/date : {e}")
 
     # ===== Allocation et distance =====
     allocation = "Allocation inconnue"
@@ -41,8 +41,8 @@ def get_quinte_info():
                     allocation = p.strip()
                 if "Distance" in p:
                     distance = p.strip()
-    except:
-        pass
+    except Exception as e:
+        print(f"Erreur récupération allocation/distance : {e}")
 
     # ===== Chevaux et numéros =====
     horses = []
@@ -57,9 +57,9 @@ def get_quinte_info():
                 horses.append({"num": num, "name": name})
             else:
                 num = cols[0].text.strip()
-                name = f"Cheval {num}"
-                horses.append({"num": num, "name": name})
-    except:
+                horses.append({"num": num, "name": f"Cheval {num}"})
+    except Exception as e:
+        print(f"Erreur récupération chevaux : {e}")
         horses = [{"num": i, "name": f"Cheval {i}"} for i in range(1, 17)]
 
     return hippodrome, date_course, allocation, distance, horses

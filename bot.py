@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import random
 
 # =========================
-# CONFIGURATION (directe)
+# CONFIGURATION DIRECTE
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903  # ton canal Telegram
@@ -16,6 +16,7 @@ def get_quinte_info():
     resp = requests.get(url)
     soup = BeautifulSoup(resp.text, "html.parser")
 
+    # Hippodrome et date
     hippodrome = "Hippodrome inconnu"
     date_course = "Date inconnue"
     try:
@@ -28,6 +29,7 @@ def get_quinte_info():
     except:
         pass
 
+    # Allocation et distance
     allocation = "Allocation inconnue"
     distance = "Distance inconnue"
     try:
@@ -42,10 +44,11 @@ def get_quinte_info():
     except:
         pass
 
+    # Chevaux et numéros
     horses = []
     try:
         table = soup.find("table", {"class": "table"})
-        rows = table.find_all("tr")[1:]
+        rows = table.find_all("tr")[1:]  # skip header
         for row in rows:
             cols = row.find_all("td")
             if len(cols) >= 2:

@@ -2,8 +2,8 @@ name: Turfoo IA Bot
 
 on:
   schedule:
-    # toutes les minutes
-    - cron: '*/1 * * * *'
+    - cron: "*/5 * * * *"
+
   workflow_dispatch:  # pour lancer manuellement si besoin
 
 jobs:

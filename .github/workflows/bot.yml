@@ -20,11 +20,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Installer Chrome
       - name: Setup Chrome
         uses: browser-tools/setup-chrome@v1
 
-      # Installer ChromeDriver compatible
       - name: Setup ChromeDriver
         uses: actions/setup-chromedriver@v1
         with:

@@ -1,31 +1,40 @@
 import requests
 import time
 from datetime import datetime, timedelta
-from bs4 import BeautifulSoup
 
-# — Ton Token & Channel Telegram —
+# — Telegram config —
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = "-1003505856903"
 
-# Site intermédiaire plus facile à parser (liste des programmes)
-PMU_PROGRAMME_SITE = "https://www.turf-fr.com/programmes-courses"
+# Format date pour l'API PMU JSON
+def get_json_programme_date():
+    now = datetime.now()
+    return now.strftime("%d%m%Y")
 
-def get_races():
-    resp = requests.get(PMU_PROGRAMME_SITE)
-    soup = BeautifulSoup(resp.text, "html.parser")
+def fetch_programme_json():
+    date_str = get_json_programme_date()
+    url = f"https://offline.turfinfo.api.pmu.fr/rest/client/7/programme/{date_str}"
+    resp = requests.get(url)
+
+    if resp.status_code != 200:
+        print("❌ Erreur JSON PMU:", resp.status_code)
+        return None
+    return resp.json()
+
+def parse_races(programme_json):
     races = []
+    if not programme_json or "programme" not in programme_json:
+        return races
 
-    # On cherche les lignes contenant heure + infos
-    for row in soup.select("tr"):
-        cells = row.find_all("td")
-        if len(cells) >= 4:
-            time_str = cells[0].text.strip()
-            name = cells[1].text.strip()
-            distance = cells[2].text.strip()
-            alloc = cells[3].text.strip()
+    for reunion in programme_json["programme"].get("reunions", []):
+        hippodrome = reunion.get("lieuProgramme", "Inconnu")
+        for course in reunion.get("courses", []):
+            heure = course.get("heureDepart")
+            alloc = course.get("allocation", "N/A")
+            dist = course.get("distance", {}).get("distance", "N/A")
 
             try:
-                race_time = datetime.strptime(time_str, "%H:%M")
+                race_time = datetime.strptime(heure, "%H:%M")
                 race_time = race_time.replace(
                     year=datetime.now().year,
                     month=datetime.now().month,
@@ -34,11 +43,10 @@ def get_races():
             except:
                 continue
 
-            # Ajoute à la liste si on a bien une heure valide
             races.append({
-                "hippodrome": name,
+                "hippodrome": hippodrome,
                 "time": race_time,
-                "distance": distance,
+                "distance": dist,
                 "allocation": alloc
             })
 
@@ -75,11 +83,12 @@ def send_telegram(message):
     requests.post(url, data=data)
 
 def run_scheduler():
-    races = get_races()
+    prog_json = fetch_programme_json()
+    races = parse_races(prog_json)
     now = datetime.now()
 
     if not races:
-        print("🔍 Aucune course trouvée aujourd’hui.")
+        print("📍 Aucune course trouvée JSON PMU.")
         return
 
     for race in races:

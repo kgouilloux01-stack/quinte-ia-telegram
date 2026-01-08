@@ -14,7 +14,7 @@ PMU_URL = "https://www.pmu.fr/turf/programme-du-jour"
 
 def get_races():
     options = Options()
-    options.add_argument("--headless")
+    options.add_argument("--headless")  # mode sans interface graphique
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
 
@@ -23,7 +23,7 @@ def get_races():
     time.sleep(5)  # attendre que JS charge les courses
 
     races = []
-    # ⚠️ CSS selector à adapter selon PMU
+    # ⚠️ CSS selector à adapter selon PMU (exemple générique)
     course_elements = driver.find_elements(By.CSS_SELECTOR, "div.course-card")
     for card in course_elements:
         try:

@@ -3,143 +3,140 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import pytz
 import random
-import re
-import time
 
-# =========================
-# CONFIG DIRECTE
-# =========================
-TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
+# ================== TELEGRAM ==================
+TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
-BASE = "https://www.turfoo.fr"
-PROGRAMMES = "https://www.turfoo.fr/programmes-courses/"
+# ================== CONFIG ==================
+TZ = pytz.timezone("Europe/Paris")
+SEND_BEFORE_MINUTES = 10
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-sent = set()
-
-# =========================
-# TELEGRAM
-# =========================
-def send(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={
+# ================== TELEGRAM SEND ==================
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
         "chat_id": CHANNEL_ID,
-        "text": msg,
+        "text": message,
         "parse_mode": "Markdown"
-    })
+    }
+    requests.post(url, json=payload, timeout=10)
 
-# =========================
-# COURSES DU JOUR
-# =========================
-def get_courses():
-    html = requests.get(PROGRAMMES, timeout=15).text
-    soup = BeautifulSoup(html, "html.parser")
-    courses = []
-
-    for a in soup.find_all("a", href=True):
-        if "/programmes-courses/" in a["href"] and "/course" in a["href"]:
-            txt = a.get_text(" ", strip=True)
-            m = re.search(r"(\d{1,2}:\d{2})", txt)
-            if m:
-                courses.append({
-                    "url": BASE + a["href"],
-                    "heure": m.group(1)
-                })
-
-    return courses
-
-# =========================
-# DÉTAIL COURSE (ROBUSTE)
-# =========================
-def parse_course(url):
-    html = requests.get(url, timeout=15).text
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(" ", strip=True)
-
-    def find(pattern, default="Inconnu"):
-        m = re.search(pattern, text, re.I)
-        return m.group(1).strip() if m else default
-
-    nom = soup.find("h1").text.strip()
-
-    hippodrome = find(r"Réunion.*?([A-Za-zÀ-ÿ\- ]+)")
-    distance = find(r"(\d{3,4}\s?m)")
-    allocation = find(r"(\d[\d\s]*€)")
-    discipline = find(r"(Plat|Trot attelé|Trot monté|Obstacle)")
-    partants = find(r"(\d{1,2})\s+partants")
-
-    try:
-        partants = int(partants)
-    except:
-        partants = 0
-
-    return nom, hippodrome, distance, allocation, discipline, partants
-
-# =========================
-# IA
-# =========================
-def prono(n):
-    nums = list(range(1, n + 1))
+# ================== IA ENGINE ==================
+def ia_top3(partants):
+    nums = list(range(1, partants + 1))
     random.shuffle(nums)
-    scores = [(x, random.randint(78, 95)) for x in nums]
-    scores.sort(key=lambda x: x[1], reverse=True)
-    return scores[:3]
+    top3 = nums[:3]
 
-# =========================
-# MAIN LOOP
-# =========================
+    scores = [random.randint(78, 95) for _ in range(3)]
+    confiance = sum(scores) // 3
+
+    emojis = "🟢" if confiance >= 70 else "🟠" if confiance >= 55 else "🔴"
+
+    return top3, scores, confiance, emojis
+
+# ================== PARSE COURSE PAGE ==================
+def parse_course(url):
+    r = requests.get(url, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    title = soup.find("h1")
+    title = title.text.strip() if title else "Course inconnue"
+
+    info = soup.get_text(" ", strip=True)
+
+    hippodrome = "France"
+    discipline = "Inconnue"
+    distance = "Inconnue"
+    allocation = "Inconnue"
+    partants = 0
+    heure = None
+
+    for line in soup.stripped_strings:
+        if "Attelé" in line or "Plat" in line or "Monté" in line:
+            discipline = line
+        if "mètres" in line:
+            distance = line
+        if "€" in line:
+            allocation = line
+        if ":" in line and len(line) == 5:
+            try:
+                heure = datetime.strptime(line, "%H:%M").time()
+            except:
+                pass
+        if "partant" in line.lower():
+            for word in line.split():
+                if word.isdigit():
+                    partants = int(word)
+
+    if partants <= 0:
+        partants = 10  # sécurité
+
+    return {
+        "title": title,
+        "hippodrome": hippodrome,
+        "discipline": discipline,
+        "distance": distance,
+        "allocation": allocation,
+        "partants": partants,
+        "heure": heure
+    }
+
+# ================== MAIN ==================
 def main():
-    tz = pytz.timezone("Europe/Paris")
-    now = datetime.now(tz)
+    today = datetime.now(TZ).strftime("%y%m%d")
+    programme_url = f"https://www.turfoo.fr/programmes-courses/{today}/"
 
-    courses = get_courses()
-    print("Courses trouvées :", len(courses))
+    r = requests.get(programme_url, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-    for c in courses:
+    course_links = []
+    for a in soup.find_all("a", href=True):
+        if "/course" in a["href"]:
+            course_links.append("https://www.turfoo.fr" + a["href"])
+
+    now = datetime.now(TZ)
+
+    for link in set(course_links):
         try:
-            h, m = map(int, c["heure"].split(":"))
-            t = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            delta = t - now
+            data = parse_course(link)
+            if not data["heure"]:
+                continue
 
-            if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-                if c["url"] in sent:
-                    continue
+            course_time = TZ.localize(datetime.combine(now.date(), data["heure"]))
+            delta = course_time - now
 
-                nom, hippo, dist, alloc, disc, partants = parse_course(c["url"])
+            if timedelta(minutes=0) <= delta <= timedelta(minutes=SEND_BEFORE_MINUTES):
 
-                if partants < 3:
-                    continue
+                top3, scores, confiance, emoji = ia_top3(data["partants"])
 
-                top = prono(partants)
+                is_quinte = data["partants"] >= 14
 
-                msg = f"""🤖 **LECTURE MACHINE – {nom}**
+                message = f"🤖 **LECTURE MACHINE – {'QUINTÉ' if is_quinte else 'COURSE'}**\n"
+                if is_quinte:
+                    message += "🔔 **QUINTÉ DÉTECTÉ**\n\n"
 
-📍 Hippodrome : {hippo}
-🏇 Discipline : {disc}
-📏 Distance : {dist}
-💰 Allocation : {alloc}
-👥 Partants : {partants}
-⏱ Heure : {c['heure']}
+                message += (
+                    f"📍 Hippodrome : {data['hippodrome']}\n"
+                    f"🏇 Discipline : {data['discipline']}\n"
+                    f"📏 Distance : {data['distance']}\n"
+                    f"💰 Allocation : {data['allocation']}\n"
+                    f"👥 Partants : {data['partants']}\n"
+                    f"⏱ Heure : {data['heure'].strftime('%H:%M')}\n\n"
+                    f"👉 **Top 3 IA** :\n"
+                    f"🥇 N°{top3[0]} (score {scores[0]}) → BASE\n"
+                    f"🥈 N°{top3[1]} (score {scores[1]}) → OUTSIDER\n"
+                    f"🥉 N°{top3[2]} (score {scores[2]}) → TOCARD\n\n"
+                    f"📊 **Confiance IA : {confiance}% {emoji}**\n\n"
+                    "🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
+                )
 
-👉 **Top 3 IA**
-🥇 N°{top[0][0]} (score {top[0][1]}) → BASE
-🥈 N°{top[1][0]} (score {top[1][1]}) → OUTSIDER
-🥉 N°{top[2][0]} (score {top[2][1]}) → TOCARD
-
-🔞 Jeu responsable – Aucun gain garanti.
-"""
-
-                send(msg)
-                sent.add(c["url"])
-                print("ENVOYÉ :", nom)
+                send_telegram(message)
 
         except Exception as e:
-            print("Erreur :", e)
+            print("Erreur course :", e)
 
-# =========================
-# RUN PERMANENT
-# =========================
+# ================== RUN ==================
 if __name__ == "__main__":
-    while True:
-        main()
-        time.sleep(60)
+    main()

@@ -1,64 +1,88 @@
-import time
-from datetime import datetime, timedelta
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import time
 
-# Telegram config
+# Télégram config
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = "-1003505856903"
 
-# PMU programme du jour
-PMU_URL = "https://www.pmu.fr/turf/programme-du-jour"
+BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 
-def get_races():
-    options = Options()
-    options.add_argument("--headless")  # mode sans interface graphique
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+# Récupérer les courses du jour
+def get_daily_courses():
+    resp = requests.get(BASE_URL)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    courses = []
 
-    driver = webdriver.Chrome(options=options)
-    driver.get(PMU_URL)
-    time.sleep(5)  # attendre que JS charge les courses
+    # Le site liste les réunions, puis lignes "C1 | … | 13h55"
+    lignes = soup.find_all(text=lambda t: "C" in t and " | " in t)
+    for ligne in lignes:
+        parts = ligne.split("|")
+        if len(parts) >= 3:
+            number = parts[0].strip()
+            name = parts[1].strip()
+            time_str = parts[2].strip()
+            # Heures au format HHhMM ou HHhMM
+            try:
+                heure = time_str.replace("h", ":")
+                race_time = datetime.strptime(heure, "%H:%M")
+                race_time = race_time.replace(
+                    year=datetime.now().year,
+                    month=datetime.now().month,
+                    day=datetime.now().day
+                )
+            except:
+                continue
 
-    races = []
-    # ⚠️ CSS selector à adapter selon PMU (exemple générique)
-    course_elements = driver.find_elements(By.CSS_SELECTOR, "div.course-card")
-    for card in course_elements:
-        try:
-            hippodrome = card.find_element(By.CSS_SELECTOR, ".course-card__meeting-name").text
-            heure = card.find_element(By.CSS_SELECTOR, ".course-card__time").text
-            distance = card.find_element(By.CSS_SELECTOR, ".course-card__distance").text
-            allocation = card.find_element(By.CSS_SELECTOR, ".course-card__prize").text
+            # Construire slug approximatif pour lien détails
+            # Ex: "ayudante" de "prix ayudante"
+            slug = name.lower().replace(" ", "-")
+            # Normalisation minimal
+            course_url = f"{BASE_URL}{datetime.now().strftime('%d%m%Y')}/{slug}"
 
-            race_time = datetime.strptime(heure, "%H:%M")
-            race_time = race_time.replace(
-                year=datetime.now().year,
-                month=datetime.now().month,
-                day=datetime.now().day
-            )
-
-            races.append({
-                "hippodrome": hippodrome,
+            courses.append({
+                "number": number,
+                "name": name,
                 "time": race_time,
-                "distance": distance,
-                "allocation": allocation
+                "detail_url": course_url
             })
-        except:
-            continue
 
-    driver.quit()
-    return races
+    return courses
 
-def generate_message(race):
+# Récupérer infos details d'une course
+def get_course_details(url):
+    resp = requests.get(url)
+    if resp.status_code != 200:
+        return {"distance": "N/A", "allocation": "N/A", "hippodrome": "Inconnu"}
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    header = soup.find("h1")
+    txt = header.text if header else ""
+    # Exemple: "Depart à 20h15 - Concepcion - 08/01/2026"
+    hippodrome = txt.split("-")[1].strip() if "-" in txt else "Inconnu"
+
+    detail_text = soup.get_text()
+    dist = "N/A"
+    alloc = "N/A"
+    # Cherche distance et allocation dans texte
+    for line in detail_text.split("\n"):
+        if "Distance:" in line:
+            dist = line.split(":")[1].strip()
+        if "Allocation:" in line:
+            alloc = line.split(":")[1].strip()
+    return {"distance": dist, "allocation": alloc, "hippodrome": hippodrome}
+
+# Message Telegram
+def format_message(c):
     return f"""
 🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**
 
-📍 Hippodrome : {race['hippodrome']}
-📅 Date : {race['time'].strftime('%d/%m/%Y')}
-💰 Allocation: {race['allocation']}
-📏 Distance: {race['distance']}
+📍 Hippodrome : {c['hippodrome']}
+📅 Date : {c['time'].strftime('%d/%m/%Y')}
+💰 Allocation: {c['allocation']}
+📏 Distance: {c['distance']}
+🏇 Course : {c['name']}
 
 👉 Top 5 IA :
 🥇 N°3 – jamaica brown (score 88)
@@ -68,33 +92,32 @@ def generate_message(race):
 5️⃣ N°6 – joy jenilou (score 80)
 
 ✅ **Lecture claire** : base possible, mais prudence.
-
-🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.
 """
 
-def send_telegram(message):
+# Envoi Telegram
+def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": CHANNEL_ID, "text": message, "parse_mode": "Markdown"}
+    data = {"chat_id": CHANNEL_ID, "text": msg, "parse_mode": "Markdown"}
     requests.post(url, data=data)
 
-def run_scheduler():
-    races = get_races()
+# Scheduler principal
+def main():
+    courses = get_daily_courses()
     now = datetime.now()
 
-    if not races:
-        print("📍 Aucune course trouvée via Selenium.")
-        return
+    for c in courses:
+        # Aller chercher détails
+        details = get_course_details(c["detail_url"])
+        c.update(details)
 
-    for race in races:
-        send_time = race["time"] - timedelta(minutes=10)
+        send_time = c["time"] - timedelta(minutes=10)
         delay = (send_time - now).total_seconds()
         if delay > 0:
-            print(f"⏱️ Attente {int(delay)}s avant {race['hippodrome']} à {race['time'].strftime('%H:%M')}")
+            print(f"Attente {int(delay)}s avant {c['name']}")
             time.sleep(delay)
 
-        message = generate_message(race)
-        send_telegram(message)
-        print(f"📤 Message envoyé pour {race['hippodrome']} à {race['time'].strftime('%H:%M')}")
+        send_telegram(format_message(c))
+        print(f"Envoyé: {c['name']}")
 
 if __name__ == "__main__":
-    run_scheduler()
+    main()

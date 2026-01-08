@@ -20,13 +20,5 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Setup Chrome
-        uses: browser-tools/setup-chrome@v1
-
-      - name: Setup ChromeDriver
-        uses: actions/setup-chromedriver@v1
-        with:
-          chromedriver-version: 'latest'
-
       - name: Run Bot
         run: python bot.py

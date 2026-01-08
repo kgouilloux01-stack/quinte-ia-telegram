@@ -1,27 +1,36 @@
-import requests
 import time
 from datetime import datetime, timedelta
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import requests
 
-# — Telegram config —
+# Telegram config
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = "-1003505856903"
 
-# URL Equidia programme du jour
-EQUIDIA_URL = "https://www.equidia.fr/courses/programme-du-jour"
+# PMU programme du jour
+PMU_URL = "https://www.pmu.fr/turf/programme-du-jour"
 
 def get_races():
-    resp = requests.get(EQUIDIA_URL)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    races = []
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
 
-    # Chaque course est dans un article avec class "course-card"
-    for card in soup.select("article.course-card"):
+    driver = webdriver.Chrome(options=options)
+    driver.get(PMU_URL)
+    time.sleep(5)  # attendre que JS charge les courses
+
+    races = []
+    # ⚠️ CSS selector à adapter selon PMU
+    course_elements = driver.find_elements(By.CSS_SELECTOR, "div.course-card")
+    for card in course_elements:
         try:
-            hippodrome = card.select_one(".course-card__meeting-name").text.strip()
-            heure = card.select_one(".course-card__time").text.strip()
-            distance = card.select_one(".course-card__distance").text.strip()
-            allocation = card.select_one(".course-card__prize").text.strip()
+            hippodrome = card.find_element(By.CSS_SELECTOR, ".course-card__meeting-name").text
+            heure = card.find_element(By.CSS_SELECTOR, ".course-card__time").text
+            distance = card.find_element(By.CSS_SELECTOR, ".course-card__distance").text
+            allocation = card.find_element(By.CSS_SELECTOR, ".course-card__prize").text
 
             race_time = datetime.strptime(heure, "%H:%M")
             race_time = race_time.replace(
@@ -39,6 +48,7 @@ def get_races():
         except:
             continue
 
+    driver.quit()
     return races
 
 def generate_message(race):
@@ -64,11 +74,7 @@ def generate_message(race):
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHANNEL_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+    data = {"chat_id": CHANNEL_ID, "text": message, "parse_mode": "Markdown"}
     requests.post(url, data=data)
 
 def run_scheduler():
@@ -76,13 +82,12 @@ def run_scheduler():
     now = datetime.now()
 
     if not races:
-        print("📍 Aucune course trouvée sur Equidia.")
+        print("📍 Aucune course trouvée via Selenium.")
         return
 
     for race in races:
         send_time = race["time"] - timedelta(minutes=10)
         delay = (send_time - now).total_seconds()
-
         if delay > 0:
             print(f"⏱️ Attente {int(delay)}s avant {race['hippodrome']} à {race['time'].strftime('%H:%M')}")
             time.sleep(delay)

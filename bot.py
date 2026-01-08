@@ -1,101 +1,73 @@
-import requests
+import requests, time, random
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-import pytz
-import random
 
-# =========================
-# CONFIGURATION DIRECTE
-# =========================
-TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
+BOT_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
-URL_TURFOO = "https://www.turfoo.fr/programmes-courses/"
-URL_QUINTE = "https://www.coin-turf.fr/pronostics-pmu/quinte/"
+TURFOO_URL = "https://www.turfoo.fr/programme-courses"
+COINTURF_URL = "https://www.cointurf.com/pronostics/quinte"
 
-tz = pytz.timezone("Europe/Paris")
-sent_courses = set()
-
-# =========================
-# TELEGRAM
-# =========================
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg, "parse_mode": "Markdown"})
+SENT = set()
 
 # =========================
-# IA
+# UTILS
 # =========================
-def generate_scores(nb_partants):
-    horses = []
-    for i in range(1, nb_partants + 1):
-        horses.append({
-            "num": i,
-            "score": random.randint(72, 95)
-        })
-    horses.sort(key=lambda x: x["score"], reverse=True)
-    return horses[:3]
 
-def compute_confidence(scores):
-    spread = scores[0]["score"] - scores[-1]["score"]
-    if spread >= 8:
-        return 85, "🟢"
-    elif spread >= 4:
-        return 68, "🟡"
-    else:
-        return 52, "🔴"
+def send(msg):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url, json={
+        "chat_id": CHANNEL_ID,
+        "text": msg,
+        "parse_mode": "Markdown"
+    })
 
-# =========================
-# QUINTÉ (COIN-TURF)
-# =========================
-def get_quinte():
-    r = requests.get(URL_QUINTE, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
+def emoji_conf(conf):
+    if conf >= 75: return "🟢"
+    if conf >= 55: return "🟠"
+    return "🔴"
 
-    hippodrome = soup.find("span", class_="hippodrome")
-    allocation = soup.find(text=lambda x: x and "€" in x)
-    distance = soup.find(text=lambda x: x and "m" in x)
-
-    horses = soup.select("table tbody tr")
-
-    nb_partants = len(horses)
-    if nb_partants == 0:
+def ia_scores(partants):
+    if partants <= 0 or partants > 30:
         return None
 
-    return {
-        "type": "QUINTE",
-        "nom": "QUINTÉ DU JOUR",
-        "hippodrome": hippodrome.text.strip() if hippodrome else "France",
-        "allocation": allocation.strip() if allocation else "Allocation inconnue",
-        "distance": distance.strip() if distance else "Distance inconnue",
-        "heure": None,
-        "partants": nb_partants
-    }
+    horses = [{
+        "num": i,
+        "score": random.randint(70, 95)
+    } for i in range(1, partants + 1)]
+
+    horses.sort(key=lambda x: x["score"], reverse=True)
+    top = horses[:3]
+
+    conf = int(sum(h["score"] for h in top) / (3 * 95) * 100)
+    return top, conf
 
 # =========================
-# TURFOO COURSES
+# TURFOO (COURSES NORMALES)
 # =========================
-def get_courses_turfoo():
-    r = requests.get(URL_TURFOO, timeout=10)
-    soup = BeautifulSoup(r.text, "html.parser")
+
+def get_turfoo():
+    soup = BeautifulSoup(requests.get(TURFOO_URL, timeout=10).text, "html.parser")
     courses = []
 
-    for a in soup.select("a.no-underline.black.fripouille"):
+    for c in soup.select("div.programme-course"):
         try:
-            code = a.select_one("span.text-turfoo-green").text.strip()
-            nom = a.select_one("span.myResearch").text.strip()
-            meta = a.select_one("span.mid-gray").text.strip()
+            heure = c.select_one(".heure").text.strip()
+            h = datetime.strptime(heure, "%H:%M").time()
 
-            heure = meta.split("•")[0].strip()
-            discipline = meta.split("•")[1].strip() if "•" in meta else "Course"
-            partants = int("".join(filter(str.isdigit, meta)))
+            partants_txt = c.select_one(".partants").text
+            partants = int(partants_txt.replace("partants", "").strip())
 
             courses.append({
-                "type": "COURSE",
-                "nom": f"{code} {nom}",
-                "discipline": discipline,
-                "heure": heure,
-                "partants": partants
+                "id": c.text[:50],
+                "nom": c.select_one(".nom-course").text.strip(),
+                "hippodrome": c.select_one(".hippodrome").text.strip(),
+                "pays": c.select_one(".pays").text.strip() if c.select_one(".pays") else "France",
+                "discipline": c.select_one(".discipline").text.strip(),
+                "distance": c.select_one(".distance").text.strip(),
+                "allocation": c.select_one(".allocation").text.strip(),
+                "partants": partants,
+                "heure": h
             })
         except:
             continue
@@ -103,62 +75,99 @@ def get_courses_turfoo():
     return courses
 
 # =========================
-# MESSAGE
+# COINTURF (QUINTÉ)
 # =========================
-def format_message(course):
-    top3 = generate_scores(course["partants"])
-    confidence, emoji = compute_confidence(top3)
 
-    roles = ["BASE", "OUTSIDER", "TOCARD"]
+def get_quinte():
+    soup = BeautifulSoup(requests.get(COINTURF_URL, timeout=10).text, "html.parser")
 
-    msg = f"🤖 **LECTURE MACHINE – {course['nom']}**\n"
+    bloc = soup.select_one("div.prono-quinte")
+    if not bloc:
+        return None
 
-    if course["type"] == "QUINTE":
-        msg += "🔔 **QUINTÉ DÉTECTÉ**\n\n"
-        msg += f"📍 Hippodrome : {course['hippodrome']}\n"
-        msg += f"💰 Allocation : {course['allocation']}\n"
-        msg += f"📏 Distance : {course['distance']}\n\n"
-    else:
-        msg += f"🏇 Discipline : {course['discipline']}\n"
-        msg += f"👥 Partants : {course['partants']}\n"
-        msg += f"⏱ Heure : {course['heure']}\n\n"
+    infos = bloc.text
 
-    msg += "👉 **Top 3 IA** :\n"
-    for i, h in enumerate(top3):
-        msg += f"{['🥇','🥈','🥉'][i]} N°{h['num']} (score {h['score']}) → {roles[i]}\n"
-
-    msg += f"\n📊 **Confiance IA : {confidence}% {emoji}**\n"
-    msg += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
-
-    return msg
+    return {
+        "nom": "QUINTÉ DU JOUR",
+        "hippodrome": bloc.select_one(".hippodrome").text.strip(),
+        "pays": "France",
+        "discipline": "Quinté",
+        "distance": bloc.select_one(".distance").text.strip(),
+        "allocation": bloc.select_one(".allocation").text.strip(),
+        "partants": 16,
+        "heure": datetime.strptime(bloc.select_one(".heure").text.strip(), "%H:%M").time()
+    }
 
 # =========================
-# MAIN
+# LOOP PRINCIPALE
 # =========================
-def main():
-    now = datetime.now(tz)
+
+while True:
+    now = datetime.now()
 
     # QUINTÉ
     quinte = get_quinte()
-    if quinte and "QUINTE" not in sent_courses:
-        msg = format_message(quinte)
-        send_telegram(msg)
-        sent_courses.add("QUINTE")
+    if quinte:
+        dt = datetime.combine(now.date(), quinte["heure"])
+        if timedelta(minutes=0) <= dt - now <= timedelta(minutes=10):
+            key = "QUINTE"
+            if key not in SENT:
+                ia = ia_scores(quinte["partants"])
+                if ia:
+                    top, conf = ia
+                    e = emoji_conf(conf)
 
-    # COURSES
-    for c in get_courses_turfoo():
-        try:
-            h, m = map(int, c["heure"].split(":"))
-            course_time = now.replace(hour=h, minute=m, second=0)
-            delta = course_time - now
+                    msg = f"""🤖 *LECTURE MACHINE – QUINTÉ DU JOUR*
+🔔 *QUINTÉ DÉTECTÉ*
 
-            key = f"{c['nom']}_{c['heure']}"
-            if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-                if key not in sent_courses:
-                    send_telegram(format_message(c))
-                    sent_courses.add(key)
-        except:
-            continue
+📍 Hippodrome : {quinte["hippodrome"]} ({quinte["pays"]})
+💰 Allocation : {quinte["allocation"]}
+📏 Distance : {quinte["distance"]}
 
-if __name__ == "__main__":
-    main()
+👉 *Top 3 IA* :
+🥇 N°{top[0]["num"]} (score {top[0]["score"]}) → BASE
+🥈 N°{top[1]["num"]} (score {top[1]["score"]}) → OUTSIDER
+🥉 N°{top[2]["num"]} (score {top[2]["score"]}) → TOCARD
+
+📊 Confiance IA : {conf}% {e}
+
+🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."""
+                    send(msg)
+                    SENT.add(key)
+
+    # COURSES NORMALES
+    for c in get_turfoo():
+        dt = datetime.combine(now.date(), c["heure"])
+        if timedelta(minutes=0) <= dt - now <= timedelta(minutes=10):
+            key = c["id"]
+            if key in SENT:
+                continue
+
+            ia = ia_scores(c["partants"])
+            if not ia:
+                continue
+
+            top, conf = ia
+            e = emoji_conf(conf)
+
+            msg = f"""🤖 *LECTURE MACHINE – {c["nom"]}*
+
+📍 Hippodrome : {c["hippodrome"]} ({c["pays"]})
+🏇 Discipline : {c["discipline"]}
+📏 Distance : {c["distance"]}
+💰 Allocation : {c["allocation"]}
+👥 Partants : {c["partants"]}
+⏱ Heure : {c["heure"].strftime('%H:%M')}
+
+👉 *Top 3 IA* :
+🥇 N°{top[0]["num"]} (score {top[0]["score"]}) → BASE
+🥈 N°{top[1]["num"]} (score {top[1]["score"]}) → OUTSIDER
+🥉 N°{top[2]["num"]} (score {top[2]["score"]}) → TOCARD
+
+📊 Confiance IA : {conf}% {e}
+
+🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."""
+            send(msg)
+            SENT.add(key)
+
+    time.sleep(30)

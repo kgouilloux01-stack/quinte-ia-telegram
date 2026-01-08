@@ -31,7 +31,15 @@ def parse_races(programme_json):
         for course in reunion.get("courses", []):
             heure = course.get("heureDepart")
             alloc = course.get("allocation", "N/A")
-            dist = course.get("distance", {}).get("distance", "N/A")
+            dist_field = course.get("distance", "N/A")
+
+            # Correction : distance peut être int ou dict
+            if isinstance(dist_field, int):
+                dist = f"{dist_field} m"
+            elif isinstance(dist_field, dict) and "distance" in dist_field:
+                dist = str(dist_field["distance"]) + " m"
+            else:
+                dist = str(dist_field)
 
             try:
                 race_time = datetime.strptime(heure, "%H:%M")

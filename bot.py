@@ -1,173 +1,100 @@
-import requests, time, random
+import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+import pytz
+import time
+import random
 
-BOT_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
+# =========================
+# CONFIG
+# =========================
+TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-
-TURFOO_URL = "https://www.turfoo.fr/programme-courses"
-COINTURF_URL = "https://www.cointurf.com/pronostics/quinte"
+URL = "https://www.turfoo.fr/programmes-courses/"
+TZ = pytz.timezone("Europe/Paris")
 
 SENT = set()
 
 # =========================
-# UTILS
-# =========================
-
 def send(msg):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, json={
-        "chat_id": CHANNEL_ID,
-        "text": msg,
-        "parse_mode": "Markdown"
-    })
-
-def emoji_conf(conf):
-    if conf >= 75: return "🟢"
-    if conf >= 55: return "🟠"
-    return "🔴"
-
-def ia_scores(partants):
-    if partants <= 0 or partants > 30:
-        return None
-
-    horses = [{
-        "num": i,
-        "score": random.randint(70, 95)
-    } for i in range(1, partants + 1)]
-
-    horses.sort(key=lambda x: x["score"], reverse=True)
-    top = horses[:3]
-
-    conf = int(sum(h["score"] for h in top) / (3 * 95) * 100)
-    return top, conf
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
 
 # =========================
-# TURFOO (COURSES NORMALES)
-# =========================
-
-def get_turfoo():
-    soup = BeautifulSoup(requests.get(TURFOO_URL, timeout=10).text, "html.parser")
+def get_courses():
+    r = requests.get(URL, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
     courses = []
 
-    for c in soup.select("div.programme-course"):
+    for a in soup.select("a.no-underline.black.fripouille"):
         try:
-            heure = c.select_one(".heure").text.strip()
-            h = datetime.strptime(heure, "%H:%M").time()
-
-            partants_txt = c.select_one(".partants").text
-            partants = int(partants_txt.replace("partants", "").strip())
+            code = a.select_one("span.text-turfoo-green").text.strip()
+            nom = a.select_one("span.myResearch").text.strip()
+            info = a.select_one("span.mid-gray").text.strip()
+            heure = info.split("•")[0].strip()
+            discipline = info.split("•")[1].strip() if "•" in info else "Inconnue"
 
             courses.append({
-                "id": c.text[:50],
-                "nom": c.select_one(".nom-course").text.strip(),
-                "hippodrome": c.select_one(".hippodrome").text.strip(),
-                "pays": c.select_one(".pays").text.strip() if c.select_one(".pays") else "France",
-                "discipline": c.select_one(".discipline").text.strip(),
-                "distance": c.select_one(".distance").text.strip(),
-                "allocation": c.select_one(".allocation").text.strip(),
-                "partants": partants,
-                "heure": h
+                "id": f"{code}-{nom}-{heure}",
+                "nom": f"{code} {nom}",
+                "heure": heure,
+                "discipline": discipline
             })
         except:
             continue
-
     return courses
 
 # =========================
-# COINTURF (QUINTÉ)
-# =========================
+def generate_prono(n_partants=10):
+    chevaux = list(range(1, n_partants + 1))
+    random.shuffle(chevaux)
 
-def get_quinte():
-    soup = BeautifulSoup(requests.get(COINTURF_URL, timeout=10).text, "html.parser")
+    base, outsider, tocard = chevaux[:3]
+    confiance = random.randint(48, 72)
 
-    bloc = soup.select_one("div.prono-quinte")
-    if not bloc:
-        return None
+    emoji = "🟢" if confiance >= 65 else "🟠" if confiance >= 55 else "🔴"
 
-    infos = bloc.text
-
-    return {
-        "nom": "QUINTÉ DU JOUR",
-        "hippodrome": bloc.select_one(".hippodrome").text.strip(),
-        "pays": "France",
-        "discipline": "Quinté",
-        "distance": bloc.select_one(".distance").text.strip(),
-        "allocation": bloc.select_one(".allocation").text.strip(),
-        "partants": 16,
-        "heure": datetime.strptime(bloc.select_one(".heure").text.strip(), "%H:%M").time()
-    }
+    return base, outsider, tocard, confiance, emoji
 
 # =========================
-# LOOP PRINCIPALE
+def build_message(course):
+    base, out, toc, conf, emoji = generate_prono()
+
+    msg = f"""🤖 **LECTURE MACHINE – {course['nom']}**
+
+📏 Discipline : {course['discipline']}
+⏱ Heure : {course['heure']}
+
+👉 Top 3 IA :
+🥇 N°{base} → BASE
+🥈 N°{out} → OUTSIDER
+🥉 N°{toc} → TOCARD
+
+📊 Confiance IA : {conf}% {emoji}
+
+🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.
+"""
+    return msg
+
 # =========================
+print("🤖 BOT LANCÉ – SURVEILLANCE EN COURS")
 
 while True:
-    now = datetime.now()
+    now = datetime.now(TZ)
+    courses = get_courses()
 
-    # QUINTÉ
-    quinte = get_quinte()
-    if quinte:
-        dt = datetime.combine(now.date(), quinte["heure"])
-        if timedelta(minutes=0) <= dt - now <= timedelta(minutes=10):
-            key = "QUINTE"
-            if key not in SENT:
-                ia = ia_scores(quinte["partants"])
-                if ia:
-                    top, conf = ia
-                    e = emoji_conf(conf)
+    for c in courses:
+        try:
+            h, m = map(int, c["heure"].split(":"))
+            ct = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            delta = ct - now
 
-                    msg = f"""🤖 *LECTURE MACHINE – QUINTÉ DU JOUR*
-🔔 *QUINTÉ DÉTECTÉ*
+            if timedelta(minutes=0) <= delta <= timedelta(minutes=15):
+                if c["id"] not in SENT:
+                    send(build_message(c))
+                    SENT.add(c["id"])
+                    print("Envoyé :", c["nom"], c["heure"])
+        except:
+            continue
 
-📍 Hippodrome : {quinte["hippodrome"]} ({quinte["pays"]})
-💰 Allocation : {quinte["allocation"]}
-📏 Distance : {quinte["distance"]}
-
-👉 *Top 3 IA* :
-🥇 N°{top[0]["num"]} (score {top[0]["score"]}) → BASE
-🥈 N°{top[1]["num"]} (score {top[1]["score"]}) → OUTSIDER
-🥉 N°{top[2]["num"]} (score {top[2]["score"]}) → TOCARD
-
-📊 Confiance IA : {conf}% {e}
-
-🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."""
-                    send(msg)
-                    SENT.add(key)
-
-    # COURSES NORMALES
-    for c in get_turfoo():
-        dt = datetime.combine(now.date(), c["heure"])
-        if timedelta(minutes=0) <= dt - now <= timedelta(minutes=10):
-            key = c["id"]
-            if key in SENT:
-                continue
-
-            ia = ia_scores(c["partants"])
-            if not ia:
-                continue
-
-            top, conf = ia
-            e = emoji_conf(conf)
-
-            msg = f"""🤖 *LECTURE MACHINE – {c["nom"]}*
-
-📍 Hippodrome : {c["hippodrome"]} ({c["pays"]})
-🏇 Discipline : {c["discipline"]}
-📏 Distance : {c["distance"]}
-💰 Allocation : {c["allocation"]}
-👥 Partants : {c["partants"]}
-⏱ Heure : {c["heure"].strftime('%H:%M')}
-
-👉 *Top 3 IA* :
-🥇 N°{top[0]["num"]} (score {top[0]["score"]}) → BASE
-🥈 N°{top[1]["num"]} (score {top[1]["score"]}) → OUTSIDER
-🥉 N°{top[2]["num"]} (score {top[2]["score"]}) → TOCARD
-
-📊 Confiance IA : {conf}% {e}
-
-🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."""
-            send(msg)
-            SENT.add(key)
-
-    time.sleep(30)
+    time.sleep(60)

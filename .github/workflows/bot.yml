@@ -1,22 +1,21 @@
-name: Turfoo IA Bot
+name: Turf IA Bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-
-  workflow_dispatch:  # pour lancer manuellement si besoin
+    - cron: "*/1 * * * *" # toutes les minutes
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.11
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |

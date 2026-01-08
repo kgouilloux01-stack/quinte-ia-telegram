@@ -1,157 +1,130 @@
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import pytz
 import random
-import json
-import os
+import time
 
 # =========================
-# CONFIG
+# CONFIGURATION TELEGRAM
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-BASE_URL = "https://www.turfoo.fr"
-PROGRAMMES_URL = "https://www.turfoo.fr/programmes-courses/"
-SENT_FILE = "sent.json"
 
 # =========================
-# LOAD SENT COURSES
+# URL PRINCIPALE DES PROGRAMMES
 # =========================
-if os.path.exists(SENT_FILE):
-    with open(SENT_FILE, "r") as f:
-        sent_courses = set(json.load(f))
-else:
-    sent_courses = set()
+TURFOO_URL = "https://www.turfoo.fr/programmes-courses/"
 
 # =========================
-# TELEGRAM
+# COURSES ENVOYEES (pour éviter doublons)
+# =========================
+sent_courses = set()
+
+# =========================
+# FONCTION D'ENVOI TELEGRAM
 # =========================
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={
-        "chat_id": CHANNEL_ID,
-        "text": msg,
-        "parse_mode": "Markdown"
-    })
+    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
 
 # =========================
-# GET ALL COURSES LINKS
+# SCRAP PAGE DE COURSE
 # =========================
-def get_course_links():
-    r = requests.get(PROGRAMMES_URL, timeout=15)
+def get_course_details(course_url):
+    r = requests.get("https://www.turfoo.fr" + course_url, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
-    links = []
-
-    for a in soup.select("a.no-underline"):
-        href = a.get("href", "")
-        if "/course" in href:
-            links.append(BASE_URL + href)
-
-    return list(set(links))
+    details = {}
+    try:
+        details["nom"] = soup.select_one("h1").text.strip()
+    except:
+        details["nom"] = "Inconnu"
+    try:
+        details["hippodrome"] = soup.select_one(".programmeSubTitle").text.strip()
+    except:
+        details["hippodrome"] = "Inconnu"
+    try:
+        infos = soup.select_one(".programmeInfos").text.strip().split("•")
+        # discipline
+        details["discipline"] = infos[0].strip() if len(infos) > 0 else "Inconnu"
+        # distance
+        details["distance"] = infos[1].strip() if len(infos) > 1 else "Inconnu"
+        # allocation
+        details["allocation"] = infos[2].strip() if len(infos) > 2 else "Inconnu"
+        # nombre de partants
+        details["partants"] = len(soup.select(".participantName"))
+    except:
+        details["discipline"] = "Inconnu"
+        details["distance"] = "Inconnu"
+        details["allocation"] = "Inconnu"
+        details["partants"] = 0
+    try:
+        details["heure"] = soup.select_one(".programmeHeure").text.strip()
+    except:
+        details["heure"] = "00:00"
+    return details
 
 # =========================
-# SCRAPE COURSE PAGE
+# SCRAP TOUTES LES COURSES DE LA PAGE PRINCIPALE
 # =========================
-def scrape_course(url):
-    r = requests.get(url, timeout=15)
+def get_all_courses():
+    r = requests.get(TURFOO_URL, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
-
-    def safe_text(selector):
-        el = soup.select_one(selector)
-        return el.text.strip() if el else "Inconnu"
-
-    nom = safe_text("h1")
-    hippodrome = safe_text(".course-infos strong")
-    heure = safe_text(".course-infos time")
-
-    discipline = "Inconnue"
-    allocation = "Inconnue"
-    partants = 0
-
-    infos = soup.get_text(" ").lower()
-
-    if "trot" in infos:
-        discipline = "Trot"
-    elif "plat" in infos:
-        discipline = "Plat"
-    elif "obstacle" in infos:
-        discipline = "Obstacle"
-
-    for span in soup.select("span"):
-        txt = span.text.replace(" ", "")
-        if "€" in txt:
-            allocation = txt
-        if "partant" in txt.lower():
-            try:
-                partants = int(''.join(filter(str.isdigit, txt)))
-            except:
-                pass
-
-    if partants <= 0:
-        partants = 12  # fallback SAFE
-
-    return {
-        "nom": nom,
-        "hippodrome": hippodrome,
-        "heure": heure,
-        "discipline": discipline,
-        "allocation": allocation,
-        "partants": partants
-    }
+    courses = []
+    for a in soup.select("a.no-underline.black.fripouille"):
+        href = a.get("href")
+        if href:
+            courses.append(href)
+    return courses
 
 # =========================
-# PRONO IA
+# PRONOSTIC IA TOP 3
 # =========================
-def generate_prono(course):
-    nums = list(range(1, course["partants"] + 1))
-    random.shuffle(nums)
-    top3 = nums[:3]
+def generate_prono(details):
+    partants = details["partants"] if details["partants"] > 0 else 16
+    horses = list(range(1, partants+1))
+    random.shuffle(horses)
+    top3 = horses[:3]
+    scores = [random.randint(80, 95) for _ in top3]
 
-    scores = [random.randint(78, 95) for _ in range(3)]
-
-    msg = f"""🤖 *LECTURE MACHINE*
-🏁 *{course['nom']}*
-
-📍 Hippodrome : {course['hippodrome']}
-🏇 Discipline : {course['discipline']}
-👥 Partants : {course['partants']}
-💰 Allocation : {course['allocation']}
-⏱ Heure : {course['heure']}
-
-👉 *Top 3 IA* :
-🥇 N°{top3[0]} (score {scores[0]}) → BASE
-🥈 N°{top3[1]} (score {scores[1]}) → OUTSIDER
-🥉 N°{top3[2]} (score {scores[2]}) → TOCARD
-
-🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.
-"""
+    msg = f"🤖 LECTURE MACHINE – {details['nom']}\n"
+    msg += f"📍 Hippodrome : {details['hippodrome']}\n"
+    msg += f"🏇 Discipline : {details['discipline']}\n"
+    msg += f"📏 Distance : {details['distance']}\n"
+    msg += f"💰 Allocation : {details['allocation']}\n"
+    msg += f"👥 Partants : {details['partants']}\n"
+    msg += f"⏱ Heure : {details['heure']}\n\n"
+    msg += "👉 Top 3 IA :\n"
+    for i, h in enumerate(top3):
+        medal = ["🥇","🥈","🥉"][i]
+        msg += f"{medal} N°{h} (score {scores[i]})\n"
+    msg += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return msg
 
 # =========================
-# MAIN
+# BOUCLE PRINCIPALE
 # =========================
 def main():
-    links = get_course_links()
-    sent_now = False
-
-    for url in links:
-        if url in sent_courses:
-            continue
-
-        try:
-            course = scrape_course(url)
-            msg = generate_prono(course)
-            send_telegram(msg)
-            sent_courses.add(url)
-            sent_now = True
-        except Exception as e:
-            print("Erreur :", e)
-
-    if sent_now:
-        with open(SENT_FILE, "w") as f:
-            json.dump(list(sent_courses), f)
-
-    if not sent_now:
-        send_telegram("ℹ️ Bot actif – aucune nouvelle course à envoyer")
+    tz = pytz.timezone("Europe/Paris")
+    while True:
+        now = datetime.now(tz)
+        courses_urls = get_all_courses()
+        for url in courses_urls:
+            details = get_course_details(url)
+            try:
+                h, m = map(int, details["heure"].split(":"))
+                course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                delta = course_time - now
+                if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
+                    if details["nom"] not in sent_courses:
+                        msg = generate_prono(details)
+                        send_telegram(msg)
+                        sent_courses.add(details["nom"])
+                        print(f"Envoyé : {details['nom']} à {details['heure']}")
+            except Exception as e:
+                print("Erreur :", e)
+                continue
+        time.sleep(60)  # vérifie toutes les minutes
 
 if __name__ == "__main__":
     main()

@@ -1,62 +1,43 @@
 import requests
 import time
 from datetime import datetime, timedelta
+from bs4 import BeautifulSoup
 
 # — Telegram config —
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = "-1003505856903"
 
-# Format date pour l'API PMU JSON
-def get_json_programme_date():
-    now = datetime.now()
-    return now.strftime("%d%m%Y")
+# URL Equidia programme du jour
+EQUIDIA_URL = "https://www.equidia.fr/courses/programme-du-jour"
 
-def fetch_programme_json():
-    date_str = get_json_programme_date()
-    url = f"https://offline.turfinfo.api.pmu.fr/rest/client/7/programme/{date_str}"
-    resp = requests.get(url)
-
-    if resp.status_code != 200:
-        print("❌ Erreur JSON PMU:", resp.status_code)
-        return None
-    return resp.json()
-
-def parse_races(programme_json):
+def get_races():
+    resp = requests.get(EQUIDIA_URL)
+    soup = BeautifulSoup(resp.text, "html.parser")
     races = []
-    if not programme_json or "programme" not in programme_json:
-        return races
 
-    for reunion in programme_json["programme"].get("reunions", []):
-        hippodrome = reunion.get("lieuProgramme", "Inconnu")
-        for course in reunion.get("courses", []):
-            heure = course.get("heureDepart")
-            alloc = course.get("allocation", "N/A")
-            dist_field = course.get("distance", "N/A")
+    # Chaque course est dans un article avec class "course-card"
+    for card in soup.select("article.course-card"):
+        try:
+            hippodrome = card.select_one(".course-card__meeting-name").text.strip()
+            heure = card.select_one(".course-card__time").text.strip()
+            distance = card.select_one(".course-card__distance").text.strip()
+            allocation = card.select_one(".course-card__prize").text.strip()
 
-            # Correction : distance peut être int ou dict
-            if isinstance(dist_field, int):
-                dist = f"{dist_field} m"
-            elif isinstance(dist_field, dict) and "distance" in dist_field:
-                dist = str(dist_field["distance"]) + " m"
-            else:
-                dist = str(dist_field)
-
-            try:
-                race_time = datetime.strptime(heure, "%H:%M")
-                race_time = race_time.replace(
-                    year=datetime.now().year,
-                    month=datetime.now().month,
-                    day=datetime.now().day
-                )
-            except:
-                continue
+            race_time = datetime.strptime(heure, "%H:%M")
+            race_time = race_time.replace(
+                year=datetime.now().year,
+                month=datetime.now().month,
+                day=datetime.now().day
+            )
 
             races.append({
                 "hippodrome": hippodrome,
                 "time": race_time,
-                "distance": dist,
-                "allocation": alloc
+                "distance": distance,
+                "allocation": allocation
             })
+        except:
+            continue
 
     return races
 
@@ -91,12 +72,11 @@ def send_telegram(message):
     requests.post(url, data=data)
 
 def run_scheduler():
-    prog_json = fetch_programme_json()
-    races = parse_races(prog_json)
+    races = get_races()
     now = datetime.now()
 
     if not races:
-        print("📍 Aucune course trouvée JSON PMU.")
+        print("📍 Aucune course trouvée sur Equidia.")
         return
 
     for race in races:

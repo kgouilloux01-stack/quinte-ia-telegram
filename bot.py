@@ -6,102 +6,140 @@ import random
 import time
 
 # =========================
-# CONFIGURATION
+# CONFIG TELEGRAM (INCLUS)
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-TURFOO_URL = "https://www.turfoo.fr/programmes-courses/"
 
-sent_courses = set()  # éviter les doublons
+BASE_URL = "https://www.turfoo.fr"
+PROGRAMMES_URL = BASE_URL + "/programmes-courses/"
+
+sent_courses = set()
 
 # =========================
-# ENVOI TELEGRAM
+# TELEGRAM
 # =========================
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHANNEL_ID, "text": msg})
+    requests.post(url, data={
+        "chat_id": CHANNEL_ID,
+        "text": msg,
+        "parse_mode": "Markdown"
+    })
 
 # =========================
-# SCRAP DES COURSES
+# LISTE DES COURSES
 # =========================
 def get_courses():
-    r = requests.get(TURFOO_URL, timeout=10)
+    r = requests.get(PROGRAMMES_URL, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
     courses = []
 
     for a in soup.select("a.no-underline.black.fripouille"):
         try:
+            link = BASE_URL + a["href"]
             code = a.select_one("span.text-turfoo-green").text.strip()
             nom = a.select_one("span.myResearch").text.strip()
-            heure_span = a.select_one("span.mid-gray").text.strip()
-            heure = heure_span.split("•")[0].strip()
-            
-            # Essayer de récupérer distance, allocation, hippodrome
-            details = heure_span.split("•")
-            distance = "Distance inconnue"
-            allocation = "Allocation inconnue"
-            hippodrome = "Hippodrome inconnu"
-            if len(details) >= 3:
-                distance = details[1].strip()
-                allocation = details[2].strip()
+            heure = a.select_one("span.mid-gray").text.split("•")[0].strip()
+
             courses.append({
+                "id": f"{code}-{heure}",
                 "nom": f"{code} {nom}",
                 "heure": heure,
-                "hippodrome": hippodrome,
-                "distance": distance,
-                "allocation": allocation
+                "url": link
             })
         except:
             continue
     return courses
 
 # =========================
-# PRONOSTIC IA
+# DÉTAILS COURSE
 # =========================
-def generate_prono(course, n_partants=12):
-    # Ici tu peux intégrer le vrai nom des chevaux si dispo
-    chevaux = [f"Cheval {i}" for i in range(1, n_partants+1)]
+def get_course_details(url):
+    r = requests.get(url, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    def safe(selector):
+        el = soup.select_one(selector)
+        return el.text.strip() if el else "Inconnu"
+
+    hippodrome = safe(".course-header__hippodrome")
+    pays = safe(".course-header__country")
+    distance = safe(".course-header__distance")
+    allocation = safe(".course-header__allocation")
+
+    chevaux = []
+    for tr in soup.select("table tbody tr"):
+        cols = tr.select("td")
+        if len(cols) >= 2:
+            chevaux.append(cols[1].text.strip())
+
+    return {
+        "hippodrome": hippodrome if hippodrome != "Inconnu" else pays,
+        "distance": distance,
+        "allocation": allocation,
+        "chevaux": chevaux
+    }
+
+# =========================
+# PRONO IA TOP 3
+# =========================
+def generate_prono(course, details):
+    chevaux = details["chevaux"]
+
+    if len(chevaux) < 3:
+        return None
+
     random.shuffle(chevaux)
     top3 = chevaux[:3]
-    
-    msg = f"🤖 **LECTURE MACHINE – {course['nom']}**\n"
-    msg += f"📍 Hippodrome : {course['hippodrome']}\n"
-    msg += f"📏 Distance : {course['distance']}\n"
-    msg += f"💰 Allocation : {course['allocation']}\n"
-    msg += f"⏱ Heure : {course['heure']}\n\n"
-    msg += "Top 3 IA :\n"
+
+    msg = f"""🤖 **LECTURE MACHINE – {course['nom']}**
+📍 {details['hippodrome']}
+📏 Distance : {details['distance']}
+💰 Allocation : {details['allocation']}
+⏱ Heure : {course['heure']}
+
+**Top 3 IA :**
+"""
+    medals = ["🥇", "🥈", "🥉"]
     for i, cheval in enumerate(top3):
-        score = random.randint(80, 90)
-        medals = ["🥇","🥈","🥉"]
+        score = random.randint(82, 91)
         msg += f"{medals[i]} {cheval} (score {score})\n"
+
     msg += "\n🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti."
     return msg
 
 # =========================
-# MAIN
+# BOUCLE PERMANENTE
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
-    now = datetime.now(tz)
-    courses = get_courses()
-    if not courses:
-        print("Aucune course trouvée !")
-        return
 
-    for course in courses:
-        try:
-            h, m = map(int, course["heure"].split(":"))
-            course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
-            delta = course_time - now
-            # envoyer 10 min avant
-            if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-                if course["nom"] not in sent_courses:
-                    msg = generate_prono(course)
-                    send_telegram(msg)
-                    sent_courses.add(course["nom"])
-                    print(f"Envoyé : {course['nom']} à {course['heure']}")
-        except:
-            continue
+    while True:
+        now = datetime.now(tz)
+        courses = get_courses()
+
+        for course in courses:
+            try:
+                h, m = map(int, course["heure"].split(":"))
+                course_time = now.replace(hour=h, minute=m, second=0)
+
+                delta = course_time - now
+
+                # ENVOI 10 MIN AVANT
+                if timedelta(minutes=9) <= delta <= timedelta(minutes=10):
+                    if course["id"] not in sent_courses:
+                        details = get_course_details(course["url"])
+                        msg = generate_prono(course, details)
+
+                        if msg:
+                            send_telegram(msg)
+                            sent_courses.add(course["id"])
+                            print("Envoyé :", course["nom"])
+            except:
+                continue
+
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()

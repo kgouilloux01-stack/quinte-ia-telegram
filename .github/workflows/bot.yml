@@ -1,16 +1,16 @@
-name: Turf IA Bot
+name: Quinté Bot
 
 on:
   schedule:
-    - cron: "*/1 * * * *" # toutes les minutes
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
-  run-bot:
+  run:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -18,9 +18,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 pytz
+        run: pip install -r requirements.txt
 
       - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: python bot.py

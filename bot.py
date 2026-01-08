@@ -3,40 +3,44 @@ import time
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
-# 🔥 Token et Channel directement inclus
+# — Ton Token & Channel Telegram —
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = "-1003505856903"
 
-# URL programme du jour sur PMU
-PMU_PROGRAMME_URL = "https://www.pmu.fr/turf/programme-du-jour"
+# Site intermédiaire plus facile à parser (liste des programmes)
+PMU_PROGRAMME_SITE = "https://www.turf-fr.com/programmes-courses"
 
 def get_races():
-    resp = requests.get(PMU_PROGRAMME_URL)
+    resp = requests.get(PMU_PROGRAMME_SITE)
     soup = BeautifulSoup(resp.text, "html.parser")
-
     races = []
-    # parse simplifié : à ajuster selon le vrai HTML de PMU
-    for course in soup.select("tr.course"):  # probable table rows des courses
-        try:
-            time_str = course.select_one("td.time").text.strip()
-            hippodrome = course.select_one("td.track").text.strip()
-            dist = course.select_one("td.distance").text.strip()
-            alloc = course.select_one("td.prize").text.strip()
-            race_time = datetime.strptime(time_str, "%H:%M")
-            race_time = race_time.replace(
-                year=datetime.now().year,
-                month=datetime.now().month,
-                day=datetime.now().day
-            )
 
+    # On cherche les lignes contenant heure + infos
+    for row in soup.select("tr"):
+        cells = row.find_all("td")
+        if len(cells) >= 4:
+            time_str = cells[0].text.strip()
+            name = cells[1].text.strip()
+            distance = cells[2].text.strip()
+            alloc = cells[3].text.strip()
+
+            try:
+                race_time = datetime.strptime(time_str, "%H:%M")
+                race_time = race_time.replace(
+                    year=datetime.now().year,
+                    month=datetime.now().month,
+                    day=datetime.now().day
+                )
+            except:
+                continue
+
+            # Ajoute à la liste si on a bien une heure valide
             races.append({
-                "hippodrome": hippodrome,
+                "hippodrome": name,
                 "time": race_time,
-                "distance": dist,
+                "distance": distance,
                 "allocation": alloc
             })
-        except Exception as e:
-            continue
 
     return races
 
@@ -74,15 +78,21 @@ def run_scheduler():
     races = get_races()
     now = datetime.now()
 
+    if not races:
+        print("🔍 Aucune course trouvée aujourd’hui.")
+        return
+
     for race in races:
         send_time = race["time"] - timedelta(minutes=10)
         delay = (send_time - now).total_seconds()
+
         if delay > 0:
-            print(f"Attente {int(delay)}s avant {race['hippodrome']}...")
+            print(f"⏱️ Attente {int(delay)}s avant {race['hippodrome']} à {race['time'].strftime('%H:%M')}")
             time.sleep(delay)
+
         message = generate_message(race)
         send_telegram(message)
-        print(f"Message envoyé pour {race['hippodrome']} à {race['time'].strftime('%H:%M')}")
+        print(f"📤 Message envoyé pour {race['hippodrome']} à {race['time'].strftime('%H:%M')}")
 
 if __name__ == "__main__":
     run_scheduler()

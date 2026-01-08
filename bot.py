@@ -1,148 +1,171 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-import time
+import pytz
 import random
-import re
+import time
 
+# =========================
+# CONFIG
+# =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+PROGRAMME_URL = "https://www.turfoo.fr/programmes-courses/"
 BASE_URL = "https://www.turfoo.fr"
-PROGRAMME_URL = "https://www.turfoo.fr/programmes-courses"
 
+tz = pytz.timezone("Europe/Paris")
 sent_courses = set()
 
-# ---------------- TELEGRAM ---------------- #
-
+# =========================
+# TELEGRAM
+# =========================
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
+    requests.post(url, data={
         "chat_id": CHANNEL_ID,
         "text": msg,
         "parse_mode": "Markdown"
-    }
-    requests.post(url, json=payload, timeout=10)
+    })
 
-# ---------------- GET ALL COURSES URL ---------------- #
-
-def get_all_course_urls():
-    r = requests.get(PROGRAMME_URL, headers=HEADERS, timeout=10)
+# =========================
+# GET COURSES (LISTE)
+# =========================
+def get_course_urls():
+    r = requests.get(PROGRAMME_URL, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
-
     urls = []
-    for a in soup.select("a[href*='/course']"):
+
+    for a in soup.select("a.no-underline.black.fripouille"):
         href = a.get("href")
         if href and "/course" in href:
             urls.append(BASE_URL + href)
 
     return list(set(urls))
 
-# ---------------- SCRAPE COURSE PAGE ---------------- #
-
+# =========================
+# GET COURSE DETAILS
+# =========================
 def get_course_details(url):
-    r = requests.get(url, headers=HEADERS, timeout=10)
+    r = requests.get(url, timeout=10)
     soup = BeautifulSoup(r.text, "html.parser")
 
-    def extract(regex, text):
-        m = re.search(regex, text)
-        return m.group(1).strip() if m else "Inconnue"
+    def safe(sel):
+        el = soup.select_one(sel)
+        return el.text.strip() if el else "Inconnu"
 
-    text = soup.get_text(" ", strip=True)
+    titre = safe("h1")
+    hippodrome = safe(".race-header__hippodrome")
+    heure = safe(".race-header__hour")
+    discipline = safe(".race-header__discipline")
+    distance = safe(".race-header__distance")
+    allocation = safe(".race-header__allocation")
+    partants = safe(".race-header__runners")
 
-    hippodrome = extract(r"Réunion\s*\d+\s*-\s*([A-Za-zÀ-ÿ\s\-]+)", text)
-    discipline = extract(r"(Trot attelé|Trot monté|Plat|Obstacle)", text)
-    distance = extract(r"(\d{3,4})\s?m", text)
-    allocation = extract(r"(\d[\d\s]*€)", text)
-    heure = extract(r"(\d{1,2}:\d{2})", text)
-
-    chevaux = []
-    for row in soup.select("table tr"):
-        cols = row.find_all("td")
-        if len(cols) >= 2:
-            num = cols[0].text.strip()
-            nom = cols[1].text.strip()
-            if num.isdigit():
-                chevaux.append({"num": int(num), "nom": nom})
+    # fallback heure
+    if ":" not in heure:
+        for span in soup.select("span"):
+            if ":" in span.text:
+                heure = span.text.strip()
+                break
 
     return {
-        "url": url,
+        "titre": titre,
         "hippodrome": hippodrome,
-        "discipline": discipline,
-        "distance": f"{distance} m" if distance != "Inconnue" else "Inconnue",
-        "allocation": allocation,
         "heure": heure,
-        "chevaux": chevaux,
-        "partants": len(chevaux)
+        "discipline": discipline,
+        "distance": distance,
+        "allocation": allocation,
+        "partants": partants,
+        "url": url
     }
 
-# ---------------- IA PRONO ---------------- #
+# =========================
+# IA PRONO
+# =========================
+def generate_prono(partants):
+    try:
+        n = int("".join(filter(str.isdigit, partants)))
+        n = min(max(n, 3), 20)
+    except:
+        n = 12
 
-def generate_prono(chevaux):
+    chevaux = list(range(1, n + 1))
     random.shuffle(chevaux)
-    top = chevaux[:3]
 
-    prono = []
-    for c in top:
-        prono.append({
-            "num": c["num"],
-            "nom": c["nom"],
-            "score": random.randint(80, 95)
-        })
+    scores = sorted(
+        [(c, random.randint(78, 95)) for c in chevaux],
+        key=lambda x: x[1],
+        reverse=True
+    )
 
-    confiance = random.randint(55, 85)
-    emoji = "🟢" if confiance >= 70 else "🟠" if confiance >= 60 else "🔴"
+    base, outsider, tocard = scores[:3]
+    confiance = random.randint(45, 75)
 
-    return prono, confiance, emoji
+    emoji = "🟢" if confiance >= 65 else "🟠" if confiance >= 55 else "🔴"
 
-# ---------------- MAIN LOOP ---------------- #
+    return base, outsider, tocard, confiance, emoji
 
-def run():
-    while True:
-        now = datetime.now()
+# =========================
+# MESSAGE
+# =========================
+def build_message(d):
+    base, outsider, tocard, confiance, emoji = generate_prono(d["partants"])
 
-        for url in get_all_course_urls():
-            if url in sent_courses:
-                continue
+    msg = f"""🤖 *LECTURE MACHINE*
+🏁 *{d['titre']}*
 
-            details = get_course_details(url)
+📍 Hippodrome : {d['hippodrome']}
+🏇 Discipline : {d['discipline']}
+📏 Distance : {d['distance']}
+💰 Allocation : {d['allocation']}
+👥 Partants : {d['partants']}
+⏱ Heure : {d['heure']}
 
-            if details["heure"] == "Inconnue":
-                continue
+👉 *Top 3 IA* :
+🥇 N°{base[0]} (score {base[1]}) → BASE
+🥈 N°{outsider[0]} (score {outsider[1]}) → OUTSIDER
+🥉 N°{tocard[0]} (score {tocard[1]}) → TOCARD
 
-            h, m = map(int, details["heure"].split(":"))
-            course_time = now.replace(hour=h, minute=m, second=0)
-
-            delta = course_time - now
-
-            if timedelta(minutes=9) <= delta <= timedelta(minutes=11):
-                prono, confiance, emoji = generate_prono(details["chevaux"])
-
-                msg = f"""🤖 **LECTURE MACHINE – COURSE DU JOUR**
-
-📍 Hippodrome : {details['hippodrome']}
-🏇 Discipline : {details['discipline']}
-📏 Distance : {details['distance']}
-💰 Allocation : {details['allocation']}
-👥 Partants : {details['partants']}
-⏱ Heure : {details['heure']}
-
-👉 **Top 3 IA**
-🥇 N°{prono[0]['num']} – {prono[0]['nom']} (score {prono[0]['score']}) → BASE
-🥈 N°{prono[1]['num']} – {prono[1]['nom']} (score {prono[1]['score']}) → OUTSIDER
-🥉 N°{prono[2]['num']} – {prono[2]['nom']} (score {prono[2]['score']}) → TOCARD
-
-📊 Confiance IA : {confiance}% {emoji}
+📊 *Confiance IA* : {confiance}% {emoji}
 
 🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.
 """
-                send_telegram(msg)
+    return msg
+
+# =========================
+# MAIN LOOP
+# =========================
+def main():
+    now = datetime.now(tz)
+
+    for url in get_course_urls():
+        if url in sent_courses:
+            continue
+
+        try:
+            d = get_course_details(url)
+            if ":" not in d["heure"]:
+                continue
+
+            h, m = map(int, d["heure"].split(":"))
+            course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+
+            delta = course_time - now
+            print(f"[CHECK] {d['titre']} → {delta}")
+
+            if timedelta(minutes=0) <= delta <= timedelta(minutes=15):
+                send_telegram(build_message(d))
                 sent_courses.add(url)
+                print("✅ ENVOYÉ :", d["titre"])
 
-        time.sleep(30)
+        except Exception as e:
+            print("Erreur :", e)
 
-# ---------------- START ---------------- #
-
+# =========================
+# RUN FOREVER (CRON / ACTIONS)
+# =========================
 if __name__ == "__main__":
-    run()
+    while True:
+        main()
+        time.sleep(60)

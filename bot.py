@@ -7,19 +7,20 @@ import re
 import time
 
 # =========================
-# CONFIG
+# CONFIG DIRECTE
 # =========================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-BASE_URL = "https://www.turfoo.fr"
-PROGRAMMES_URL = "https://www.turfoo.fr/programmes-courses/"
 
-sent_courses = set()
+BASE = "https://www.turfoo.fr"
+PROGRAMMES = "https://www.turfoo.fr/programmes-courses/"
+
+sent = set()
 
 # =========================
-# TOOLS
+# TELEGRAM
 # =========================
-def send_telegram(msg):
+def send(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={
         "chat_id": CHANNEL_ID,
@@ -27,132 +28,116 @@ def send_telegram(msg):
         "parse_mode": "Markdown"
     })
 
-def extract_time(text):
-    match = re.search(r'(\d{1,2}):(\d{2})', text)
-    if match:
-        return int(match.group(1)), int(match.group(2))
-    return None, None
-
 # =========================
-# SCRAP LISTE DES COURSES
+# COURSES DU JOUR
 # =========================
 def get_courses():
-    r = requests.get(PROGRAMMES_URL, timeout=15)
-    soup = BeautifulSoup(r.text, "html.parser")
+    html = requests.get(PROGRAMMES, timeout=15).text
+    soup = BeautifulSoup(html, "html.parser")
     courses = []
 
-    for a in soup.select("a.no-underline.black.fripouille"):
-        try:
-            href = a.get("href")
-            heure_txt = a.select_one("span.mid-gray").text.strip()
-            heure = heure_txt.split("•")[0].strip()
-
-            courses.append({
-                "url": BASE_URL + href,
-                "heure": heure
-            })
-        except:
-            continue
+    for a in soup.find_all("a", href=True):
+        if "/programmes-courses/" in a["href"] and "/course" in a["href"]:
+            txt = a.get_text(" ", strip=True)
+            m = re.search(r"(\d{1,2}:\d{2})", txt)
+            if m:
+                courses.append({
+                    "url": BASE + a["href"],
+                    "heure": m.group(1)
+                })
 
     return courses
 
 # =========================
-# SCRAP DÉTAIL COURSE
+# DÉTAIL COURSE (ROBUSTE)
 # =========================
-def get_course_details(url):
-    r = requests.get(url, timeout=15)
-    soup = BeautifulSoup(r.text, "html.parser")
+def parse_course(url):
+    html = requests.get(url, timeout=15).text
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(" ", strip=True)
 
-    def safe(sel):
-        el = soup.select_one(sel)
-        return el.text.strip() if el else "Inconnu"
+    def find(pattern, default="Inconnu"):
+        m = re.search(pattern, text, re.I)
+        return m.group(1).strip() if m else default
 
-    nom = safe("h1")
-    hippodrome = safe(".breadcrumb li:nth-child(2)")
-    discipline = safe(".race-type")
-    distance = safe(".race-distance")
-    allocation = safe(".race-allocation")
+    nom = soup.find("h1").text.strip()
 
-    partants = soup.select(".runner-number")
-    nb_partants = len(partants)
+    hippodrome = find(r"Réunion.*?([A-Za-zÀ-ÿ\- ]+)")
+    distance = find(r"(\d{3,4}\s?m)")
+    allocation = find(r"(\d[\d\s]*€)")
+    discipline = find(r"(Plat|Trot attelé|Trot monté|Obstacle)")
+    partants = find(r"(\d{1,2})\s+partants")
 
-    return {
-        "nom": nom,
-        "hippodrome": hippodrome,
-        "discipline": discipline,
-        "distance": distance,
-        "allocation": allocation,
-        "partants": nb_partants
-    }
+    try:
+        partants = int(partants)
+    except:
+        partants = 0
+
+    return nom, hippodrome, distance, allocation, discipline, partants
 
 # =========================
-# IA PRONO
+# IA
 # =========================
-def generate_prono(nb_partants):
-    nums = list(range(1, nb_partants + 1))
+def prono(n):
+    nums = list(range(1, n + 1))
     random.shuffle(nums)
-
-    scores = sorted(
-        [(n, random.randint(75, 95)) for n in nums],
-        key=lambda x: x[1],
-        reverse=True
-    )
-
+    scores = [(x, random.randint(78, 95)) for x in nums]
+    scores.sort(key=lambda x: x[1], reverse=True)
     return scores[:3]
 
 # =========================
-# MAIN
+# MAIN LOOP
 # =========================
 def main():
     tz = pytz.timezone("Europe/Paris")
     now = datetime.now(tz)
 
     courses = get_courses()
-    if not courses:
-        print("Aucune course trouvée")
-        return
+    print("Courses trouvées :", len(courses))
 
     for c in courses:
-        h, m = extract_time(c["heure"])
-        if h is None:
-            continue
+        try:
+            h, m = map(int, c["heure"].split(":"))
+            t = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            delta = t - now
 
-        course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
-        delta = course_time - now
+            if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
+                if c["url"] in sent:
+                    continue
 
-        if timedelta(minutes=0) <= delta <= timedelta(minutes=10):
-            if c["url"] in sent_courses:
-                continue
+                nom, hippo, dist, alloc, disc, partants = parse_course(c["url"])
 
-            details = get_course_details(c["url"])
-            if details["partants"] < 3:
-                continue
+                if partants < 3:
+                    continue
 
-            top3 = generate_prono(details["partants"])
+                top = prono(partants)
 
-            msg = f"""🤖 **LECTURE MACHINE – {details['nom']}**
+                msg = f"""🤖 **LECTURE MACHINE – {nom}**
 
-📍 Hippodrome : {details['hippodrome']}
-🏇 Discipline : {details['discipline']}
-📏 Distance : {details['distance']}
-💰 Allocation : {details['allocation']}
-👥 Partants : {details['partants']}
+📍 Hippodrome : {hippo}
+🏇 Discipline : {disc}
+📏 Distance : {dist}
+💰 Allocation : {alloc}
+👥 Partants : {partants}
 ⏱ Heure : {c['heure']}
 
-👉 **Top 3 IA :**
-🥇 N°{top3[0][0]} (score {top3[0][1]}) → **BASE**
-🥈 N°{top3[1][0]} (score {top3[1][1]}) → **OUTSIDER**
-🥉 N°{top3[2][0]} (score {top3[2][1]}) → **TOCARD**
+👉 **Top 3 IA**
+🥇 N°{top[0][0]} (score {top[0][1]}) → BASE
+🥈 N°{top[1][0]} (score {top[1][1]}) → OUTSIDER
+🥉 N°{top[2][0]} (score {top[2][1]}) → TOCARD
 
-🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.
+🔞 Jeu responsable – Aucun gain garanti.
 """
 
-            send_telegram(msg)
-            sent_courses.add(c["url"])
-            print("Envoyé :", details["nom"], c["heure"])
+                send(msg)
+                sent.add(c["url"])
+                print("ENVOYÉ :", nom)
+
+        except Exception as e:
+            print("Erreur :", e)
 
 # =========================
-# LOOP (OBLIGATOIRE POUR GH ACTIONS)
+# RUN PERMANENT
 # =========================
 if __name__ == "__main__":
     while True:

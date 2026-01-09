@@ -1,20 +1,17 @@
-import requests
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from datetime import datetime
+import time
+import requests
 
 # =====================
 # CONFIG TELEGRAM
 # =====================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
-CHANNEL_ID = -1003505856903  # INT obligatoire
+CHANNEL_ID = -1003505856903
 
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/117.0.0.0 Safari/537.36"
-}
 
 # =====================
 # TELEGRAM
@@ -26,23 +23,63 @@ def send_telegram(message):
     if r.status_code != 200:
         print("❌ Erreur Telegram :", r.text)
     else:
-        print("✅ Message envoyé avec succès")
+        print("✅ Message envoyé")
 
 # =====================
-# SCRAP PAGE DETAIL
+# SELENIUM SETUP
 # =====================
-def get_course_detail(url):
-    if url.startswith("/"):
-        url = "https://www.coin-turf.fr" + url
-    resp = requests.get(url, headers=HEADERS, timeout=15)
-    soup = BeautifulSoup(resp.text, "html.parser")
+def get_driver():
+    options = Options()
+    options.headless = True
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    driver = webdriver.Chrome(options=options)
+    return driver
 
-    # InfosCourse : Allocation, Distance, Partants
-    infos_text = soup.select_one("div.InfosCourse").get_text(strip=True)
-    allocation = "N/A"
-    distance = "N/A"
-    partants = "N/A"
+# =====================
+# SCRAP COURSES
+# =====================
+def scrape_courses(driver):
+    driver.get(BASE_URL)
+    time.sleep(5)  # attendre que JS charge le contenu
 
+    courses = []
+
+    rows = driver.find_elements(By.CSS_SELECTOR, "tr[id^='courseId_']")
+    for row in rows:
+        try:
+            course_id = row.get_attribute("id")
+            reunion = row.find_element(By.XPATH, "../../preceding-sibling::div[1]//span[1]").text
+            nom_course = row.find_element(By.CSS_SELECTOR, f"#{course_id} > td:nth-child(2)").text
+            heure = row.find_element(By.CSS_SELECTOR, f"#{course_id} > td:nth-child(3)").text
+            hippodrome = row.find_element(By.XPATH, "../../preceding-sibling::div[1]//span[2]").text
+
+            link_tag = row.find_element(By.CSS_SELECTOR, f"#{course_id} > td:nth-child(2) a")
+            link = link_tag.get_attribute("href") if link_tag else None
+
+            courses.append({
+                "reunion": reunion,
+                "nom": nom_course,
+                "heure": heure,
+                "hippodrome": hippodrome,
+                "link": link
+            })
+        except Exception as e:
+            print("❌ Erreur parse course:", e)
+            continue
+
+    return courses
+
+# =====================
+# SCRAP DETAIL COURSE
+# =====================
+def scrape_course_detail(driver, url):
+    driver.get(url)
+    time.sleep(3)  # attendre que JS charge le contenu
+
+    infos_text = driver.find_element(By.CSS_SELECTOR, "div.InfosCourse").text
+    allocation = distance = partants = "N/A"
     if "Allocation:" in infos_text:
         allocation = infos_text.split("Allocation:")[1].split("-")[0].strip()
     if "Distance:" in infos_text:
@@ -50,13 +87,12 @@ def get_course_detail(url):
     if "Partants" in infos_text:
         partants = infos_text.split("-")[-1].replace("Partants","").strip()
 
-    # Chevaux
     chevaux = []
-    rows = soup.select(".TablePartantDesk > tbody:nth-child(2) > tr")
+    rows = driver.find_elements(By.CSS_SELECTOR, ".TablePartantDesk > tbody:nth-child(2) > tr")
     for row in rows:
         try:
-            numero = row.select_one("td:nth-child(1)").get_text(strip=True)
-            nom = row.select_one("td:nth-child(2)").get_text(strip=True)
+            numero = row.find_element(By.CSS_SELECTOR, "td:nth-child(1)").text.strip()
+            nom = row.find_element(By.CSS_SELECTOR, "td:nth-child(2)").text.strip()
             chevaux.append(f"{numero} - {nom}")
         except:
             continue
@@ -64,58 +100,23 @@ def get_course_detail(url):
     return allocation, distance, partants, chevaux
 
 # =====================
-# SCRAP LISTE COURSES
-# =====================
-def get_first_course():
-    resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    row = soup.find("tr", id=lambda x: x and x.startswith("courseId_"))
-    if not row:
-        print("❌ Aucune course trouvée")
-        return None
-
-    try:
-        reunion = row.select_one("div.TabPanev:nth-child(1) > div:nth-child(1) > span:nth-child(1)").get_text(strip=True)
-        nom_course = row.select_one("#" + row["id"] + " > td:nth-child(2)").get_text(strip=True)
-        heure_text = row.select_one("#" + row["id"] + " > td:nth-child(3)").get_text(strip=True)
-        hippodrome = row.select_one("div.TabPanev:nth-child(1) > div:nth-child(1) > span:nth-child(2)").get_text(strip=True)
-        link_tag = row.select_one("#" + row["id"] + " > td:nth-child(2) a")
-        link = link_tag["href"] if link_tag else None
-
-        race_time = datetime.strptime(heure_text, "%Hh%M")
-        
-        # DEBUG
-        print("DEBUG: Première course trouvée :", nom_course, heure_text, hippodrome, link)
-
-        return {
-            "reunion": reunion,
-            "nom": nom_course,
-            "heure": race_time.strftime("%H:%M"),
-            "hippodrome": hippodrome,
-            "link": link
-        }
-    except Exception as e:
-        print("❌ Erreur parse course:", e)
-        return None
-
-# =====================
-# MAIN TEST
+# MAIN
 # =====================
 def main():
-    course = get_first_course()
-    if not course or not course["link"]:
-        print("❌ Pas de lien pour la course")
-        return
-
-    allocation, distance, partants, chevaux = get_course_detail(course["link"])
-
-    message = f"""
+    driver = get_driver()
+    try:
+        courses = scrape_courses(driver)
+        for c in courses:
+            if not c["link"]:
+                continue
+            allocation, distance, partants, chevaux = scrape_course_detail(driver, c["link"])
+            message = f"""
 🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**
 
-📍 {course['nom']}
-📌 Réunion : {course['reunion']}
-⏰ Départ : {course['heure']}
-🏟 Hippodrome : {course['hippodrome']}
+📍 {c['nom']}
+📌 Réunion : {c['reunion']}
+⏰ Départ : {c['heure']}
+🏟 Hippodrome : {c['hippodrome']}
 💰 Allocation : {allocation}
 📏 Distance : {distance}
 👥 Partants : {partants}
@@ -125,10 +126,10 @@ def main():
 
 ✅ Test direct – aucun gain garanti.
 """
-    send_telegram(message)
+            send_telegram(message)
 
-# =====================
-# START
-# =====================
+    finally:
+        driver.quit()
+
 if __name__ == "__main__":
     main()

@@ -1,8 +1,5 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from datetime import datetime
-import time
+import asyncio
+from playwright.async_api import async_playwright
 import requests
 
 # =====================
@@ -10,7 +7,6 @@ import requests
 # =====================
 TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
-
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 
 # =====================
@@ -26,90 +22,75 @@ def send_telegram(message):
         print("✅ Message envoyé")
 
 # =====================
-# SELENIUM SETUP
-# =====================
-def get_driver():
-    options = Options()
-    options.headless = True
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    driver = webdriver.Chrome(options=options)
-    return driver
-
-# =====================
 # SCRAP COURSES
 # =====================
-def scrape_courses(driver):
-    driver.get(BASE_URL)
-    time.sleep(5)  # attendre que JS charge le contenu
+async def scrape_courses():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto(BASE_URL)
+        await page.wait_for_timeout(5000)  # attendre JS
 
-    courses = []
+        courses = []
 
-    rows = driver.find_elements(By.CSS_SELECTOR, "tr[id^='courseId_']")
-    for row in rows:
-        try:
-            course_id = row.get_attribute("id")
-            reunion = row.find_element(By.XPATH, "../../preceding-sibling::div[1]//span[1]").text
-            nom_course = row.find_element(By.CSS_SELECTOR, f"#{course_id} > td:nth-child(2)").text
-            heure = row.find_element(By.CSS_SELECTOR, f"#{course_id} > td:nth-child(3)").text
-            hippodrome = row.find_element(By.XPATH, "../../preceding-sibling::div[1]//span[2]").text
+        rows = await page.query_selector_all("tr[id^='courseId_']")
+        for row in rows:
+            try:
+                course_id = await row.get_attribute("id")
+                reunion = await row.evaluate(
+                    "(r) => r.closest('div.TabPanev').querySelector('span:nth-child(1)').innerText"
+                )
+                nom_course = await row.query_selector_eval(
+                    f"#{course_id} > td:nth-child(2)", "el => el.innerText"
+                )
+                heure = await row.query_selector_eval(
+                    f"#{course_id} > td:nth-child(3)", "el => el.innerText"
+                )
+                hippodrome = await row.evaluate(
+                    "(r) => r.closest('div.TabPanev').querySelector('span:nth-child(2)').innerText"
+                )
+                link_el = await row.query_selector(f"#{course_id} > td:nth-child(2) a")
+                link = await link_el.get_attribute("href") if link_el else None
+                if link and link.startswith("/"):
+                    link = "https://www.coin-turf.fr" + link
 
-            link_tag = row.find_element(By.CSS_SELECTOR, f"#{course_id} > td:nth-child(2) a")
-            link = link_tag.get_attribute("href") if link_tag else None
+                courses.append({
+                    "reunion": reunion,
+                    "nom": nom_course,
+                    "heure": heure,
+                    "hippodrome": hippodrome,
+                    "link": link
+                })
+            except Exception as e:
+                print("❌ Erreur parse course:", e)
+                continue
 
-            courses.append({
-                "reunion": reunion,
-                "nom": nom_course,
-                "heure": heure,
-                "hippodrome": hippodrome,
-                "link": link
-            })
-        except Exception as e:
-            print("❌ Erreur parse course:", e)
-            continue
-
-    return courses
-
-# =====================
-# SCRAP DETAIL COURSE
-# =====================
-def scrape_course_detail(driver, url):
-    driver.get(url)
-    time.sleep(3)  # attendre que JS charge le contenu
-
-    infos_text = driver.find_element(By.CSS_SELECTOR, "div.InfosCourse").text
-    allocation = distance = partants = "N/A"
-    if "Allocation:" in infos_text:
-        allocation = infos_text.split("Allocation:")[1].split("-")[0].strip()
-    if "Distance:" in infos_text:
-        distance = infos_text.split("Distance:")[1].split("-")[0].strip()
-    if "Partants" in infos_text:
-        partants = infos_text.split("-")[-1].replace("Partants","").strip()
-
-    chevaux = []
-    rows = driver.find_elements(By.CSS_SELECTOR, ".TablePartantDesk > tbody:nth-child(2) > tr")
-    for row in rows:
-        try:
-            numero = row.find_element(By.CSS_SELECTOR, "td:nth-child(1)").text.strip()
-            nom = row.find_element(By.CSS_SELECTOR, "td:nth-child(2)").text.strip()
-            chevaux.append(f"{numero} - {nom}")
-        except:
-            continue
-
-    return allocation, distance, partants, chevaux
-
-# =====================
-# MAIN
-# =====================
-def main():
-    driver = get_driver()
-    try:
-        courses = scrape_courses(driver)
+        # DETAIL COURSES
         for c in courses:
             if not c["link"]:
                 continue
-            allocation, distance, partants, chevaux = scrape_course_detail(driver, c["link"])
+            await page.goto(c["link"])
+            await page.wait_for_timeout(3000)
+            infos_text = await page.text_content("div.InfosCourse")
+            allocation = distance = partants = "N/A"
+            if "Allocation:" in infos_text:
+                allocation = infos_text.split("Allocation:")[1].split("-")[0].strip()
+            if "Distance:" in infos_text:
+                distance = infos_text.split("Distance:")[1].split("-")[0].strip()
+            if "Partants" in infos_text:
+                partants = infos_text.split("-")[-1].replace("Partants","").strip()
+
+            # Chevaux
+            chevaux = []
+            rows_chev = await page.query_selector_all(".TablePartantDesk > tbody:nth-child(2) > tr")
+            for rowc in rows_chev:
+                try:
+                    numero = await rowc.query_selector_eval("td:nth-child(1)", "el => el.innerText")
+                    nom = await rowc.query_selector_eval("td:nth-child(2)", "el => el.innerText")
+                    chevaux.append(f"{numero} - {nom}")
+                except:
+                    continue
+
             message = f"""
 🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**
 
@@ -128,8 +109,9 @@ def main():
 """
             send_telegram(message)
 
-    finally:
-        driver.quit()
+        await browser.close()
 
-if __name__ == "__main__":
-    main()
+# =====================
+# START
+# =====================
+asyncio.run(scrape_courses())

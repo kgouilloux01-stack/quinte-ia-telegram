@@ -29,7 +29,7 @@ async def scrape_courses():
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto(BASE_URL)
-        await page.wait_for_timeout(5000)  # attendre que JS charge le contenu
+        await page.wait_for_timeout(5000)  # attendre JS
 
         courses = []
 
@@ -37,20 +37,25 @@ async def scrape_courses():
         for row in rows:
             try:
                 course_id = await row.get_attribute("id")
-                reunion = await row.evaluate(
-                    "(r) => r.closest('div.TabPanev').querySelector('span:nth-child(1)').innerText"
-                )
-                nom_course = await row.query_selector_eval(
-                    f"#{course_id} > td:nth-child(2)", "el => el.innerText"
-                )
-                heure = await row.query_selector_eval(
-                    f"#{course_id} > td:nth-child(3)", "el => el.innerText"
-                )
-                hippodrome = await row.evaluate(
-                    "(r) => r.closest('div.TabPanev').querySelector('span:nth-child(2)').innerText"
-                )
-                link_el = await row.query_selector(f"#{course_id} > td:nth-child(2) a")
-                link = await link_el.get_attribute("href") if link_el else None
+                
+                # Réunion et Hippodrome
+                parent_tab = await row.evaluate_handle("(r) => r.closest('div.TabPanev')")
+                reunion_span = await parent_tab.query_selector("span:nth-child(1)")
+                reunion = await reunion_span.text_content() if reunion_span else "N/A"
+                hippodrome_span = await parent_tab.query_selector("span:nth-child(2)")
+                hippodrome = await hippodrome_span.text_content() if hippodrome_span else "N/A"
+
+                # Nom de la course
+                td_nom = await row.query_selector("td:nth-child(2)")
+                nom_course = await td_nom.text_content() if td_nom else "N/A"
+
+                # Heure
+                td_heure = await row.query_selector("td:nth-child(3)")
+                heure = await td_heure.text_content() if td_heure else "N/A"
+
+                # Lien
+                a_tag = await row.query_selector("td:nth-child(2) a")
+                link = await a_tag.get_attribute("href") if a_tag else None
                 if link and link.startswith("/"):
                     link = "https://www.coin-turf.fr" + link
 
@@ -73,11 +78,11 @@ async def scrape_courses():
             await page.wait_for_timeout(3000)
             infos_text = await page.text_content("div.InfosCourse")
             allocation = distance = partants = "N/A"
-            if "Allocation:" in infos_text:
+            if infos_text and "Allocation:" in infos_text:
                 allocation = infos_text.split("Allocation:")[1].split("-")[0].strip()
-            if "Distance:" in infos_text:
+            if infos_text and "Distance:" in infos_text:
                 distance = infos_text.split("Distance:")[1].split("-")[0].strip()
-            if "Partants" in infos_text:
+            if infos_text and "Partants" in infos_text:
                 partants = infos_text.split("-")[-1].replace("Partants","").strip()
 
             # Chevaux
@@ -85,8 +90,10 @@ async def scrape_courses():
             rows_chev = await page.query_selector_all(".TablePartantDesk > tbody:nth-child(2) > tr")
             for rowc in rows_chev:
                 try:
-                    numero = await rowc.query_selector_eval("td:nth-child(1)", "el => el.innerText")
-                    nom = await rowc.query_selector_eval("td:nth-child(2)", "el => el.innerText")
+                    td_num = await rowc.query_selector("td:nth-child(1)")
+                    td_nom = await rowc.query_selector("td:nth-child(2)")
+                    numero = await td_num.text_content() if td_num else "N/A"
+                    nom = await td_nom.text_content() if td_nom else "N/A"
                     chevaux.append(f"{numero} - {nom}")
                 except:
                     continue

@@ -32,7 +32,6 @@ def main():
     response = requests.get(BASE_URL, timeout=15)
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # Toutes les courses sont dans <tr id="courseId_xxx">
     rows = soup.find_all("tr", id=re.compile("^courseId_"))
 
     if not rows:
@@ -43,14 +42,15 @@ def main():
 
     for row in rows:
         try:
-            tds = row.find_all("td")
-            if len(tds) < 3:
+            row_text = row.get_text(" ", strip=True)
+
+            # ===== EXTRACTION HEURE (ex: 14h35)
+            match = re.search(r"\b(\d{1,2}h\d{2})\b", row_text)
+            if not match:
                 continue
 
-            # ===== Heure (td 2)
-            time_text = tds[1].get_text(strip=True)  # ex: 20h15
-            race_time = datetime.strptime(time_text, "%Hh%M")
-            race_time = race_time.replace(
+            time_text = match.group(1)
+            race_time = datetime.strptime(time_text, "%Hh%M").replace(
                 year=now.year,
                 month=now.month,
                 day=now.day
@@ -58,29 +58,30 @@ def main():
 
             delta_minutes = (race_time - now).total_seconds() / 60
 
-            # ===== ENVOI 10 à 15 minutes avant
+            # ===== 10 à 15 minutes avant
             if not (10 <= delta_minutes <= 15):
                 continue
 
-            # ===== Nom + lien (td 3)
-            link = tds[2].find("a")
+            # ===== LIEN COURSE
+            link = row.find("a", href=True)
             if not link:
                 continue
 
-            course_name = link.get_text(strip=True)
             detail_url = link["href"]
 
-            # ===== Page détail
+            # ===== PAGE DÉTAIL
             detail_page = requests.get(detail_url, timeout=15)
             dsoup = BeautifulSoup(detail_page.text, "html.parser")
 
-            header = dsoup.find("h1")
-            header_text = header.get_text(" ", strip=True) if header else "Course"
+            title = dsoup.find("h1")
+            title_text = title.get_text(strip=True) if title else "Course"
 
-            distance = "N/A"
-            allocation = "N/A"
+            distance = "Distance inconnue"
+            allocation = "Allocation inconnue"
 
-            for line in dsoup.get_text().split("\n"):
+            text = dsoup.get_text("\n")
+
+            for line in text.split("\n"):
                 if "Distance" in line:
                     distance = line.strip()
                 if "Allocation" in line:
@@ -88,26 +89,25 @@ def main():
 
             # ===== MESSAGE
             message = f"""
-🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**
+🤖 **PRONOSTIC IA – COIN-TURF**
 
-📍 {header_text}
+📍 {title_text}
 ⏰ Départ : {race_time.strftime('%H:%M')}
 💰 {allocation}
 📏 {distance}
 
-👉 **Top 5 IA**
-🥇 N°3 – jamaica brown (88)
-🥈 N°11 – jolie star (85)
-🥉 N°15 – jasmine de vau (83)
-4️⃣ N°10 – ines de la rouvre (80)
-5️⃣ N°6 – joy jenilou (80)
+🏇 **Sélection IA (Top 5)**
+🥇 N°3
+🥈 N°11
+🥉 N°15
+4️⃣ N°10
+5️⃣ N°6
 
-✅ Base possible, mais prudence.
-🔞 Jeu responsable – aucun gain garanti.
+⚠️ Jeu responsable – aucun gain garanti
 """
 
             send_telegram(message)
-            print(f"✅ Message envoyé : {course_name}")
+            print(f"✅ Envoyé : {title_text}")
 
         except Exception as e:
             print("❌ Erreur course :", e)

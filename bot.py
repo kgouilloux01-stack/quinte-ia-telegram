@@ -10,6 +10,12 @@ CHANNEL_ID = -1003505856903  # INT obligatoire
 
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/117.0.0.0 Safari/537.36"
+}
+
 # =====================
 # TELEGRAM
 # =====================
@@ -26,12 +32,13 @@ def send_telegram(message):
 # SCRAP PAGE DETAIL
 # =====================
 def get_course_detail(url):
-    resp = requests.get(url, timeout=15)
+    if url.startswith("/"):
+        url = "https://www.coin-turf.fr" + url
+    resp = requests.get(url, headers=HEADERS, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
 
     # InfosCourse : Allocation, Distance, Partants
     infos_text = soup.select_one("div.InfosCourse").get_text(strip=True)
-    # Exemple : "Plat - Allocation: 14600€ - Distance: 2500 mètres - Corde droite - 12 Partants"
     allocation = "N/A"
     distance = "N/A"
     partants = "N/A"
@@ -60,7 +67,7 @@ def get_course_detail(url):
 # SCRAP LISTE COURSES
 # =====================
 def get_first_course():
-    resp = requests.get(BASE_URL, timeout=15)
+    resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
     row = soup.find("tr", id=lambda x: x and x.startswith("courseId_"))
     if not row:
@@ -76,6 +83,10 @@ def get_first_course():
         link = link_tag["href"] if link_tag else None
 
         race_time = datetime.strptime(heure_text, "%Hh%M")
+        
+        # DEBUG
+        print("DEBUG: Première course trouvée :", nom_course, heure_text, hippodrome, link)
+
         return {
             "reunion": reunion,
             "nom": nom_course,

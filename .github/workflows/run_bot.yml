@@ -22,4 +22,4 @@ jobs:
           pip install requests beautifulsoup4
 
       - name: Run bot
-        run: python bot_coin_turf.py
+        run: python bot.py

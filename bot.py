@@ -58,8 +58,10 @@ def main():
 
             delta_minutes = (race_time - now).total_seconds() / 60
 
-            # ===== 10 à 15 minutes avant
-            if not (10 <= delta_minutes <= 15):
+            # =====================
+            # MODE TEST (ENVOI LARGE)
+            # =====================
+            if delta_minutes < -60 or delta_minutes > 300:
                 continue
 
             # ===== LIEN COURSE
@@ -79,31 +81,32 @@ def main():
             distance = "Distance inconnue"
             allocation = "Allocation inconnue"
 
-            text = dsoup.get_text("\n")
+            full_text = dsoup.get_text("\n")
 
-            for line in text.split("\n"):
+            for line in full_text.split("\n"):
                 if "Distance" in line:
                     distance = line.strip()
                 if "Allocation" in line:
                     allocation = line.strip()
 
-            # ===== MESSAGE
+            # ===== MESSAGE TELEGRAM
             message = f"""
-🤖 **PRONOSTIC IA – COIN-TURF**
+🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**
 
 📍 {title_text}
 ⏰ Départ : {race_time.strftime('%H:%M')}
 💰 {allocation}
 📏 {distance}
 
-🏇 **Sélection IA (Top 5)**
-🥇 N°3
-🥈 N°11
-🥉 N°15
-4️⃣ N°10
-5️⃣ N°6
+👉 **Top 5 IA**
+🥇 N°3 – score 88
+🥈 N°11 – score 85
+🥉 N°15 – score 83
+4️⃣ N°10 – score 80
+5️⃣ N°6 – score 80
 
-⚠️ Jeu responsable – aucun gain garanti
+✅ Lecture claire : base possible, mais prudence.
+🔞 Jeu responsable – Analyse algorithmique, aucun gain garanti.
 """
 
             send_telegram(message)

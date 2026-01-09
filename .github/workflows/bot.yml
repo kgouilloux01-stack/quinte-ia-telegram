@@ -1,35 +1,29 @@
 name: Quinte IA Telegram
 
 on:
-  workflow_dispatch:  # permet de lancer le workflow manuellement
+  workflow_dispatch:  # lancer manuellement
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      # Installer Chrome
-      - name: Install Chrome
-        uses: browser-actions/setup-chrome@v1
-
-      # Installer ChromeDriver
-      - name: Install ChromeDriver
-        uses: browser-actions/setup-chromedriver@v1
-
-      # Installer Python et dépendances
+      # Installer Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: 3.11
 
-      - name: Install Python dependencies
+      # Installer Playwright et dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium requests
+          pip install playwright requests
+          playwright install chromium
 
       # Lancer le bot
       - name: Run bot
-        run: python bot_selenium.py
+        run: python bot_playwright.py

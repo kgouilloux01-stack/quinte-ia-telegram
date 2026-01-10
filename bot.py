@@ -1,6 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import json
 import random
@@ -16,6 +16,7 @@ CHANNEL_ID = -1003505856903
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SENT_FILE = "sent.json"
+RESULTS_FILE = "results.json"  # Pour suivre les résultats et calculer le % de réussite
 
 # =====================
 # TELEGRAM
@@ -30,27 +31,29 @@ def send_telegram(message):
     print("📨 Telegram status:", r.status_code)
 
 # =====================
-# GESTION sent.json
+# GESTION SENT
 # =====================
 def load_sent():
     if os.path.exists(SENT_FILE):
         with open(SENT_FILE, "r") as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                return []
+            return json.load(f)
     return []
 
 def save_sent(sent):
     with open(SENT_FILE, "w") as f:
         json.dump(sent, f)
 
+# Réinitialiser tous les jours à minuit
 def reset_sent_daily():
-    today = datetime.now(ZoneInfo("Europe/Paris")).date()
+    now = datetime.now(ZoneInfo("Europe/Paris"))
     if os.path.exists(SENT_FILE):
-        file_date = datetime.fromtimestamp(os.path.getmtime(SENT_FILE)).date()
-        if file_date != today:
-            os.remove(SENT_FILE)
+        with open(SENT_FILE, "r") as f:
+            data = json.load(f)
+        last_reset = data[0]["date"] if data else None
+        if last_reset != now.strftime("%Y-%m-%d"):
+            save_sent([])
+    else:
+        save_sent([])
 
 # =====================
 # SCRAP DETAIL COURSE
@@ -81,106 +84,130 @@ def get_course_detail(link):
             nom_td = row.select_one("td:nth-child(2)")
             if num_td and nom_td:
                 num = num_td.get_text(strip=True)
-                nom = " ".join(nom_td.stripped_strings)
-                if nom:
-                    chevaux.append(f"{num} – {nom}")
+                # Nettoyage complet : on ne garde que le nom, pas les performances
+                raw_nom = " ".join(nom_td.stripped_strings)
+                nom_clean = "".join([c for c in raw_nom if c.isalpha() or c.isspace() or c=="-"]).strip()
+                if nom_clean:
+                    chevaux.append(f"{num} – {nom_clean}")
         except:
             continue
 
     return allocation, distance, partants, chevaux
 
 # =====================
-# GENERER UN PRONOSTIC IA
+# GENERER UN PRONOSTIC IA REALISTE
 # =====================
 def generate_ia(chevaux):
     if not chevaux:
         return []
 
-    # Sélection simple mais plus crédible : favori = 1er, tocard = dernier, outsider = aléatoire milieu
+    # Favori = 1er cheval
     favori = chevaux[0]
+    # Tocard = dernier cheval
     tocard = chevaux[-1] if len(chevaux) > 1 else chevaux[0]
-    middle = chevaux[len(chevaux)//2] if len(chevaux) > 2 else chevaux[0]
-    pronostic = [favori, tocard, middle]
+    # Outsider = milieu
+    outsider = chevaux[len(chevaux)//2] if len(chevaux) > 2 else chevaux[0]
 
     emojis = ["😎", "🤔", "🥶"]
+    pronostic = [favori, tocard, outsider]
     return [f"{emojis[i]} {pronostic[i]}" for i in range(len(pronostic))]
 
 # =====================
-# MAIN
+# STATISTIQUES
+# =====================
+def update_results(course_id, pronostic, arrived):
+    # pronostic : liste [favori, tocard, outsider]
+    # arrived : liste des numéros qui ont fini dans les 3 premiers
+    if os.path.exists(RESULTS_FILE):
+        with open(RESULTS_FILE, "r") as f:
+            data = json.load(f)
+    else:
+        data = []
+
+    placed = sum(1 for p in pronostic if any(p.split(" – ")[0]==str(a) for a in arrived))
+    data.append({"date": datetime.now().strftime("%Y-%m-%d"), "placed": placed, "total": len(pronostic)})
+    # Conserver 30 derniers jours
+    data = [d for d in data if datetime.strptime(d["date"], "%Y-%m-%d") >= datetime.now()-timedelta(days=30)]
+    with open(RESULTS_FILE, "w") as f:
+        json.dump(data, f)
+
+def calc_stats():
+    if not os.path.exists(RESULTS_FILE):
+        return 0
+    with open(RESULTS_FILE, "r") as f:
+        data = json.load(f)
+    total = sum(d["total"] for d in data)
+    placed = sum(d["placed"] for d in data)
+    return round(placed / total * 100) if total else 0
+
+# =====================
+# MAIN LOOP
 # =====================
 def main():
-    reset_sent_daily()
-    sent = load_sent()
-    now = datetime.now(ZoneInfo("Europe/Paris"))
-
-    print("🕒 Heure Paris :", now.strftime("%H:%M"))
-    print("🔎 Chargement de la page principale...")
-
-    try:
-        resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(resp.text, "html.parser")
-    except Exception as e:
-        print("❌ Erreur chargement page principale :", e)
-        return
-
-    rows = soup.find_all("tr", class_="clickable-row")
-    print(f"🔎 {len(rows)} courses trouvées sur la page principale")
-
-    for row in rows:
+    while True:
         try:
-            course_id = row.get("id")
-            if not course_id or course_id in sent:
-                continue
+            reset_sent_daily()
+            sent = load_sent()
+            now = datetime.now(ZoneInfo("Europe/Paris"))
+            print("🕒 Heure Paris :", now.strftime("%H:%M"))
+            resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
+            soup = BeautifulSoup(resp.text, "html.parser")
+            rows = soup.find_all("tr", class_="clickable-row")
+            print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
-            # Numéro de la course
-            td_num = row.select_one("td.td1")
-            course_num = td_num.get_text(strip=True) if td_num else "N/A"
+            for row in rows:
+                try:
+                    course_id = row.get("id")
+                    if not course_id or course_id in sent:
+                        continue
 
-            # Nom de la course
-            td_name = row.select_one("td.td2 div.TdTitre")
-            course_name = td_name.get_text(strip=True) if td_name else "N/A"
+                    course_num = row.select_one("td.td1").get_text(strip=True)
+                    course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
+                    link = row.get("data-href")
+                    hipp_name = "N/A"
+                    if link and "_" in link:
+                        hipp_name = link.split("_")[1].split("/")[0].capitalize()
+                    heure_txt = row.select_one("td.td3").get_text(strip=True)
 
-            # Hippodrome → récupérer depuis data-href
-            link = row.get("data-href")
-            hipp_name = "N/A"
-            if link and "_" in link:
-                hipp_name = link.split("_")[1].split("/")[0].capitalize()
+                    allocation, distance, partants, chevaux = get_course_detail(link)
+                    if not chevaux:
+                        continue
 
-            # Heure
-            td_heure = row.select_one("td.td3")
-            heure_txt = td_heure.get_text(strip=True) if td_heure else "00h00"
+                    pronostic = generate_ia(chevaux)
 
-            # Détails course
-            allocation, distance, partants, chevaux = get_course_detail(link)
-            if not chevaux:
-                continue
+                    # Calcul du délai pour envoyer 10 min avant
+                    course_time = datetime.strptime(heure_txt, "%Hh%M").replace(tzinfo=ZoneInfo("Europe/Paris"))
+                    delay = (course_time - datetime.now(ZoneInfo("Europe/Paris")) - timedelta(minutes=10)).total_seconds()
+                    if delay > 0:
+                        time.sleep(delay)
 
-            # Pronostic IA
-            pronostic = generate_ia(chevaux)
+                    message = (
+                        f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
+                        f"🏟 Réunion {hipp_name} - {course_num}\n"
+                        f"📍 {course_name}\n"
+                        f"⏰ Départ : {heure_txt}\n"
+                        f"💰 Allocation : {allocation}\n"
+                        f"📏 Distance : {distance}\n"
+                        f"👥 Partants : {partants}\n\n"
+                        "👉 Pronostic IA\n" +
+                        "\n".join(pronostic) +
+                        f"\n\n📊 Ce bot affiche {calc_stats()}% de chevaux placés sur les 30 derniers jours\n"
+                        "🔞 Jeu responsable – Analyse automatisée"
+                    )
 
-            # Message
-            message = (
-                f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
-                f"🏟 Réunion {hipp_name} - {course_num}\n"
-                f"📍 {course_name}\n"
-                f"⏰ Départ : {heure_txt}\n"
-                f"💰 Allocation : {allocation}\n"
-                f"📏 Distance : {distance}\n"
-                f"👥 Partants : {partants}\n\n"
-                "👉 Pronostic IA\n" +
-                "\n".join(pronostic) +
-                "\n\n🔞 Jeu responsable – Analyse automatisée"
-            )
+                    send_telegram(message)
+                    sent.append(course_id)
+                    save_sent(sent)
 
-            # Envoi Telegram
-            send_telegram(message)
-            sent.append(course_id)
-            save_sent(sent)
+                except Exception as e:
+                    print("❌ Erreur course :", e)
+
+            # Re-check toutes les 5 minutes
+            time.sleep(300)
 
         except Exception as e:
-            print("❌ Erreur course :", e)
+            print("❌ Erreur générale :", e)
+            time.sleep(60)
 
 if __name__ == "__main__":
-    while True:
-        main()
-        time.sleep(60)  # vérifie toutes les 60 secondes
+    main()

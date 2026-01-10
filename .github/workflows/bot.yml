@@ -1,29 +1,26 @@
-name: Turf Bot
+name: Bot Turf
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "*/2 * * * *"
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4
-
-      - name: Reset sent.json at midnight
+      - name: Install deps
         run: |
-          HOUR=$(date +%H)
-          if [ "$HOUR" = "00" ]; then echo "[]" > sent.json; fi
+          pip install requests beautifulsoup4
 
       - name: Run bot
         run: python bot.py

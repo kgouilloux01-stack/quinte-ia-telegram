@@ -1,11 +1,10 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
 import random
 import os
-import re
 import time
 
 # =====================
@@ -30,10 +29,16 @@ def send_telegram(message):
     })
     print("📨 Telegram status:", r.status_code)
 
+# =====================
+# GESTION sent.json
+# =====================
 def load_sent():
     if os.path.exists(SENT_FILE):
         with open(SENT_FILE, "r") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
     return []
 
 def save_sent(sent):
@@ -43,10 +48,8 @@ def save_sent(sent):
 def reset_sent_daily():
     today = datetime.now(ZoneInfo("Europe/Paris")).date()
     if os.path.exists(SENT_FILE):
-        with open(SENT_FILE, "r") as f:
-            data = json.load(f)
-        last_date = data[0]["date"] if data else None
-        if last_date != str(today):
+        file_date = datetime.fromtimestamp(os.path.getmtime(SENT_FILE)).date()
+        if file_date != today:
             os.remove(SENT_FILE)
 
 # =====================
@@ -56,7 +59,7 @@ def get_course_detail(link):
     if link.startswith("/"):
         link = "https://www.coin-turf.fr" + link
 
-    soup = BeautifulSoup(requests.get(link, headers=HEADERS).text, "html.parser")
+    soup = BeautifulSoup(requests.get(link, headers=HEADERS, timeout=15).text, "html.parser")
 
     allocation = distance = partants = "N/A"
     info = soup.select_one("div.InfosCourse")
@@ -74,55 +77,54 @@ def get_course_detail(link):
     rows = soup.select(".TablePartantDesk tbody tr")
     for row in rows:
         try:
-            num = row.select_one("td:nth-child(1)").get_text(strip=True)
+            num_td = row.select_one("td:nth-child(1)")
             nom_td = row.select_one("td:nth-child(2)")
-            nom = " ".join(nom_td.stripped_strings) if nom_td else ""
-            # Supprimer performances
-            nom_clean = re.sub(r"\(\d{2,}\).*$", "", nom).strip()
-            if nom_clean:
-                chevaux.append(f"{num} – {nom_clean}")
+            if num_td and nom_td:
+                num = num_td.get_text(strip=True)
+                nom = " ".join(nom_td.stripped_strings)
+                if nom:
+                    chevaux.append(f"{num} – {nom}")
         except:
             continue
 
     return allocation, distance, partants, chevaux
 
 # =====================
-# GENERER UN PRONOSTIC IA CREDIBLE
+# GENERER UN PRONOSTIC IA
 # =====================
 def generate_ia(chevaux):
     if not chevaux:
         return []
 
-    # Favori : petit numéro ou dans top 5 du site
-    fav_candidates = [c for c in chevaux if int(c.split(" – ")[0]) <= 5]
-    # Tocard : numéro moyen
-    tocard_candidates = [c for c in chevaux if 5 < int(c.split(" – ")[0]) <= 10]
-    # Outsider : gros numéro
-    outsider_candidates = [c for c in chevaux if int(c.split(" – ")[0]) > 10]
+    # Sélection simple mais plus crédible : favori = 1er, tocard = dernier, outsider = aléatoire milieu
+    favori = chevaux[0]
+    tocard = chevaux[-1] if len(chevaux) > 1 else chevaux[0]
+    middle = chevaux[len(chevaux)//2] if len(chevaux) > 2 else chevaux[0]
+    pronostic = [favori, tocard, middle]
 
-    favoris = random.sample(fav_candidates, 1) if fav_candidates else random.sample(chevaux, 1)
-    tocards = random.sample(tocard_candidates, 1) if tocard_candidates else random.sample(chevaux, 1)
-    outsiders = random.sample(outsider_candidates, 1) if outsider_candidates else random.sample(chevaux, 1)
-
-    return [
-        f"😎 {favoris[0]}",
-        f"🤔 {tocards[0]}",
-        f"🥶 {outsiders[0]}"
-    ]
+    emojis = ["😎", "🤔", "🥶"]
+    return [f"{emojis[i]} {pronostic[i]}" for i in range(len(pronostic))]
 
 # =====================
-# ENVOI 10 MINUTES AVANT
+# MAIN
 # =====================
 def main():
+    reset_sent_daily()
     sent = load_sent()
     now = datetime.now(ZoneInfo("Europe/Paris"))
 
     print("🕒 Heure Paris :", now.strftime("%H:%M"))
-    reset_sent_daily()
+    print("🔎 Chargement de la page principale...")
 
-    resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
-    soup = BeautifulSoup(resp.text, "html.parser")
+    try:
+        resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
+        soup = BeautifulSoup(resp.text, "html.parser")
+    except Exception as e:
+        print("❌ Erreur chargement page principale :", e)
+        return
+
     rows = soup.find_all("tr", class_="clickable-row")
+    print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
     for row in rows:
         try:
@@ -130,42 +132,50 @@ def main():
             if not course_id or course_id in sent:
                 continue
 
+            # Numéro de la course
+            td_num = row.select_one("td.td1")
+            course_num = td_num.get_text(strip=True) if td_num else "N/A"
+
+            # Nom de la course
+            td_name = row.select_one("td.td2 div.TdTitre")
+            course_name = td_name.get_text(strip=True) if td_name else "N/A"
+
+            # Hippodrome → récupérer depuis data-href
+            link = row.get("data-href")
+            hipp_name = "N/A"
+            if link and "_" in link:
+                hipp_name = link.split("_")[1].split("/")[0].capitalize()
+
             # Heure
-            heure_txt = row.select_one("td.td3").get_text(strip=True)
-            h, m = map(int, heure_txt.split("h"))
-            course_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            td_heure = row.select_one("td.td3")
+            heure_txt = td_heure.get_text(strip=True) if td_heure else "00h00"
 
-            # Envoyer seulement 10 min avant
-            if now + timedelta(minutes=10) >= course_time:
-                course_num = row.select_one("td.td1").get_text(strip=True)
-                course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
-                link = row.get("data-href")
-                hipp_name = "N/A"
-                if link and "_" in link:
-                    hipp_name = link.split("_")[1].split("/")[0].capitalize()
+            # Détails course
+            allocation, distance, partants, chevaux = get_course_detail(link)
+            if not chevaux:
+                continue
 
-                allocation, distance, partants, chevaux = get_course_detail(link)
-                if not chevaux:
-                    continue
+            # Pronostic IA
+            pronostic = generate_ia(chevaux)
 
-                pronostic = generate_ia(chevaux)
+            # Message
+            message = (
+                f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
+                f"🏟 Réunion {hipp_name} - {course_num}\n"
+                f"📍 {course_name}\n"
+                f"⏰ Départ : {heure_txt}\n"
+                f"💰 Allocation : {allocation}\n"
+                f"📏 Distance : {distance}\n"
+                f"👥 Partants : {partants}\n\n"
+                "👉 Pronostic IA\n" +
+                "\n".join(pronostic) +
+                "\n\n🔞 Jeu responsable – Analyse automatisée"
+            )
 
-                message = (
-                    f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
-                    f"🏟 Réunion {hipp_name} - {course_num}\n"
-                    f"📍 {course_name}\n"
-                    f"⏰ Départ : {heure_txt}\n"
-                    f"💰 Allocation : {allocation}\n"
-                    f"📏 Distance : {distance}\n"
-                    f"👥 Partants : {partants}\n\n"
-                    "👉 Pronostic IA\n" +
-                    "\n".join(pronostic) +
-                    "\n\n🔞 Jeu responsable – Analyse automatisée"
-                )
-
-                send_telegram(message)
-                sent.append(course_id)
-                save_sent(sent)
+            # Envoi Telegram
+            send_telegram(message)
+            sent.append(course_id)
+            save_sent(sent)
 
         except Exception as e:
             print("❌ Erreur course :", e)
@@ -173,4 +183,4 @@ def main():
 if __name__ == "__main__":
     while True:
         main()
-        time.sleep(60)  # vérifie toutes les minutes
+        time.sleep(60)  # vérifie toutes les 60 secondes

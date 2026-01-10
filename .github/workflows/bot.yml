@@ -1,6 +1,7 @@
 name: Turf Bot
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "*/2 * * * *"
 

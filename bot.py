@@ -10,8 +10,8 @@ import re
 # =====================
 # CONFIG
 # =====================
-TELEGRAM_TOKEN = "TON_TOKEN"
-CHANNEL_ID = -100XXXXXXXXXX
+TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
+CHANNEL_ID = -1003505856903
 
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}

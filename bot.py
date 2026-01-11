@@ -1,10 +1,10 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 import json
 import random
 import os
+import time
 
 # =====================
 # CONFIG TELEGRAM
@@ -30,7 +30,7 @@ def send_telegram(message):
     print("📨 Telegram status:", r.status_code)
 
 # =====================
-# CHARGEMENT / SAUVEGARDE
+# LOAD / SAVE SENT
 # =====================
 def load_sent():
     if os.path.exists(SENT_FILE):
@@ -42,6 +42,9 @@ def save_sent(sent):
     with open(SENT_FILE, "w") as f:
         json.dump(sent, f)
 
+# =====================
+# LOAD / SAVE RESULTS
+# =====================
 def load_results():
     if os.path.exists(RESULTS_FILE):
         with open(RESULTS_FILE, "r") as f:
@@ -85,68 +88,59 @@ def get_course_detail(link):
         except:
             continue
 
-    # Arrivée officielle
+    # Arrivée officielle si déjà passée
+    arrivee_div = soup.select_one("h2.titre_arrivee_officiel div")
     arrivee = []
-    h2 = soup.select_one("h2.titre_arrivee_officiel div")
-    if h2:
-        arrivee = [x.strip() for x in h2.get_text().split("-")]
+    if arrivee_div:
+        arrivee = [int(x.strip()) for x in arrivee_div.get_text(strip=True).split("-")]
 
     return allocation, distance, partants, chevaux, arrivee
 
 # =====================
-# GENERER PRONOSTIC IA
+# GENERER UN PRONOSTIC IA
 # =====================
 def generate_ia(chevaux):
     if not chevaux:
         return []
-    # Favori / Tocard / Outsider
-    favoris = random.sample(chevaux, min(1, len(chevaux)))
-    tocards = random.sample([c for c in chevaux if c not in favoris], min(1, len(chevaux)))
-    outsiders = random.sample([c for c in chevaux if c not in favoris + tocards], min(1, len(chevaux)))
-    pronostic = []
-    if favoris: pronostic.append(f"😎 {favoris[0]}")
-    if tocards: pronostic.append(f"🤔 {tocards[0]}")
-    if outsiders: pronostic.append(f"🥶 {outsiders[0]}")
-    return pronostic
+    # Favori = petit numéro ou parmi les 5 premiers chevaux
+    favori = chevaux[0] if len(chevaux) >= 1 else chevaux[0]
+    tocard = chevaux[-2] if len(chevaux) >= 2 else chevaux[-1]
+    outsider = chevaux[len(chevaux)//2] if len(chevaux) >= 3 else chevaux[-1]
+    return [
+        f"😎 {favori}",
+        f"🤔 {tocard}",
+        f"🥶 {outsider}"
+    ]
 
 # =====================
-# CALCUL % CHEVAUX PLACES
+# CALCUL POURCENTAGE PLACES
 # =====================
-def calc_success_rate(results, pronostics, jours=30):
-    # Filtrer 30 derniers jours
-    cutoff = datetime.now(ZoneInfo("Europe/Paris")) - timedelta(days=jours)
-    recent = [r for r in results if datetime.fromisoformat(r["date"]) > cutoff]
-
-    if not recent:
+def calc_percentage(results):
+    last_30 = results[-30:]
+    if not last_30:
         return 0
-
     placed = 0
-    for r in recent:
-        arrived = r["arrivee"]
-        pron = r["pronostic"]
-        for p in pron:
-            # Extraire numéro cheval
-            num = p.split("–")[0].strip()
-            if num in arrived[:3]:  # placé dans top 3
-                placed += 1
-                break
-
-    return round(placed / len(recent) * 100)
+    for r in last_30:
+        pronostic_nums = [int(x.split(" – ")[0]) for x in r["pronostic"]]
+        arrivée = r.get("arrivee", [])
+        if any(num in pronostic_nums[:3] for num in arrivée):
+            placed += 1
+    return round(placed / len(last_30) * 100)
 
 # =====================
-# MAIN
+# MAIN LOOP
 # =====================
 def main():
     sent = load_sent()
     results = load_results()
-    now = datetime.now(ZoneInfo("Europe/Paris"))
 
-    print("🕒 Heure Paris :", now.strftime("%H:%M"))
+    print("🕒 Heure Paris :", datetime.now().strftime("%H:%M"))
     print("🔎 Chargement de la page principale...")
 
     resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
     rows = soup.find_all("tr", class_="clickable-row")
+
     print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
     for row in rows:
@@ -155,77 +149,54 @@ def main():
             if not course_id or course_id in sent:
                 continue
 
-            # Numéro de la course
-            course_num_td = row.select_one("td.td1")
-            if not course_num_td: continue
-            course_num = course_num_td.get_text(strip=True)
-
-            # Nom de la course
-            course_name_td = row.select_one("td.td2 div.TdTitre")
-            if not course_name_td: continue
-            course_name = course_name_td.get_text(strip=True)
-
-            # Hippodrome → récupérer depuis data-href
+            course_num = row.select_one("td.td1").get_text(strip=True)
+            course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
             link = row.get("data-href")
             hipp_name = "N/A"
             if link and "_" in link:
-                hipp_name = link.split("_")[1].split("/")[0].capitalize()
+                hipp_name = link.split("_")[1].split("/")[0].replace("-", " ").capitalize()
 
-            # Heure
-            heure_td = row.select_one("td.td3")
-            if not heure_td: continue
-            heure_txt = heure_td.get_text(strip=True)
-            # Convertir en datetime aware
-            course_time = datetime.strptime(heure_txt, "%H:%M").replace(
-                year=now.year, month=now.month, day=now.day, tzinfo=ZoneInfo("Europe/Paris")
-            )
-            # Si course passée minuit
-            if course_time < now:
-                course_time += timedelta(days=1)
+            heure_txt = row.select_one("td.td3").get_text(strip=True)
+            heure_course = datetime.strptime(heure_txt, "%Hh%M")
 
-            # Détails course
             allocation, distance, partants, chevaux, arrivee = get_course_detail(link)
             if not chevaux:
                 continue
 
-            # Pronostic IA
             pronostic = generate_ia(chevaux)
 
-            # Envoi 10 min avant la course
-            if 0 <= (course_time - now).total_seconds() <= 10*60:
-                # Ajouter arrivée si déjà dispo
-                message = (
-                    f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
-                    f"🏟 Réunion {hipp_name} - {course_num}\n"
-                    f"📍 {course_name}\n"
-                    f"⏰ Départ : {heure_txt}\n"
-                    f"💰 Allocation : {allocation}\n"
-                    f"📏 Distance : {distance}\n"
-                    f"👥 Partants : {partants}\n\n"
-                    "👉 Pronostic IA\n" +
-                    "\n".join(pronostic)
-                )
+            # Calcul du % actuel
+            perc = calc_percentage(results)
 
-                # Ajouter le % de réussite
-                success_rate = calc_success_rate(results, pronostic)
-                message += f"\n\n📊 Ce bot affiche {success_rate}% de chevaux placés sur les 30 derniers jours"
-                message += "\n🔞 Jeu responsable – Analyse automatisée"
+            message = (
+                f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
+                f"🏟 Réunion {hipp_name} - {course_num}\n"
+                f"📍 {course_name}\n"
+                f"⏰ Départ : {heure_txt}\n"
+                f"💰 Allocation : {allocation}\n"
+                f"📏 Distance : {distance}\n"
+                f"👥 Partants : {partants}\n\n"
+                "👉 Pronostic IA\n" +
+                "\n".join(pronostic) +
+                f"\n\n📊 Ce bot affiche {perc}% de chevaux placés sur les 30 derniers jours"
+                "\n🔞 Jeu responsable – Analyse automatisée"
+            )
 
+            # Envoi 10 min avant
+            now = datetime.now()
+            if heure_course - timedelta(minutes=10) <= now <= heure_course:
                 send_telegram(message)
                 sent.append(course_id)
                 save_sent(sent)
 
-            # Sauvegarde résultat course pour stats
-            results.append({
-                "date": now.isoformat(),
-                "course_id": course_id,
-                "pronostic": pronostic,
-                "arrivee": arrivee
-            })
+            # Sauvegarde des résultats pour suivi automatique
+            results.append({"course_id": course_id, "pronostic": pronostic, "arrivee": arrivee, "date": datetime.now().isoformat()})
             save_results(results)
 
         except Exception as e:
             print("❌ Erreur course :", e)
 
 if __name__ == "__main__":
-    main()
+    while True:
+        main()
+        time.sleep(60)  # Vérifie toutes les 60 secondes

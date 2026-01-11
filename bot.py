@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 import json
 import random
 import os
+import re
+import time
 
 # =====================
 # CONFIG TELEGRAM
@@ -22,11 +24,16 @@ STATS_FILE = "stats.json"
 # =====================
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={
+    r = requests.post(url, data={
         "chat_id": CHANNEL_ID,
-        "text": message
+        "text": message,
+        "parse_mode": "Markdown"
     })
+    print("📨 Telegram status:", r.status_code)
 
+# =====================
+# FICHIERS
+# =====================
 def load_sent():
     if os.path.exists(SENT_FILE):
         with open(SENT_FILE, "r") as f:
@@ -37,9 +44,6 @@ def save_sent(sent):
     with open(SENT_FILE, "w") as f:
         json.dump(sent, f)
 
-# =====================
-# STATS
-# =====================
 def load_stats():
     if os.path.exists(STATS_FILE):
         with open(STATS_FILE, "r") as f:
@@ -50,29 +54,12 @@ def save_stats(stats):
     with open(STATS_FILE, "w") as f:
         json.dump(stats, f)
 
-def update_stats(prono, arrivee):
-    stats = load_stats()
-    placed = 0
-    for p in prono:
-        num = p.split(" – ")[0]
-        if num in arrivee[:3]:  # top 3 placés
-            placed += 1
-    stats.append({"date": datetime.now().isoformat(), "placed": placed / len(prono)})
-    # garder seulement les 30 derniers jours
-    cutoff = datetime.now() - timedelta(days=30)
-    stats = [s for s in stats if datetime.fromisoformat(s["date"]) >= cutoff]
-    save_stats(stats)
-    if stats:
-        return round(sum(s["placed"] for s in stats)/len(stats)*100)
-    return 0
-
 # =====================
-# SCRAP DETAIL COURSE
+# DETAILS COURSE
 # =====================
 def get_course_detail(link):
     if link.startswith("/"):
         link = "https://www.coin-turf.fr" + link
-
     soup = BeautifulSoup(requests.get(link, headers=HEADERS).text, "html.parser")
 
     allocation = distance = partants = "N/A"
@@ -86,20 +73,26 @@ def get_course_detail(link):
         if "Partants" in txt:
             partants = txt.split("Partants")[0].split("-")[-1].strip()
 
+    # Chevaux
     chevaux = []
     rows = soup.select(".TablePartantDesk tbody tr")
     for row in rows:
-        td_num = row.select_one("td:nth-child(1)")
-        td_nom = row.select_one("td:nth-child(2)")
-        if not td_num or not td_nom:
+        try:
+            num = row.select_one("td:nth-child(1)").get_text(strip=True)
+            nom_td = row.select_one("td:nth-child(2)")
+            nom = ""
+            if nom_td:
+                # nettoyage complet du nom
+                raw_nom = " ".join(nom_td.stripped_strings)
+                raw_nom = raw_nom.split("(")[0].strip()  # supprime les performances
+                # garder seulement lettres, accents et tirets
+                nom = " ".join(re.findall(r"[A-Za-zÀ-ÿ\-]+", raw_nom))
+                if nom:
+                    chevaux.append(f"{num} – {nom}")
+        except:
             continue
 
-        num = td_num.get_text(strip=True)
-        nom = td_nom.get_text(" ", strip=True).split("(")[0].strip()  # supprimer perf
-
-        chevaux.append(f"{num} – {nom}")
-
-    # récupération arrivée si dispo
+    # Arrivée officielle si disponible
     arrivee_div = soup.select_one("h2.titre_arrivee_officiel div")
     arrivee = []
     if arrivee_div:
@@ -108,21 +101,37 @@ def get_course_detail(link):
     return allocation, distance, partants, chevaux, arrivee
 
 # =====================
-# PRONOSTIC IA SIMPLE
+# PRONOSTIC IA
 # =====================
-def generate_prono(chevaux):
-    if len(chevaux) < 3:
+def generate_ia(chevaux):
+    if not chevaux:
         return []
+    # favori = premier cheval
+    # tocard = petit numéro random
+    # outsider = dernier cheval random
+    fav = chevaux[0]
+    tocard = random.choice(chevaux[1: max(2, len(chevaux)//2)])
+    outsider = random.choice(chevaux[max(1, len(chevaux)//2):])
+    return ["😎 " + fav, "🤔 " + tocard, "🥶 " + outsider]
 
-    base = chevaux[0]
-    tocard = random.choice(chevaux[1:])
-    outsider = random.choice(chevaux[1:])
-
-    return [
-        f"😎 {base}",
-        f"🤔 {tocard}",
-        f"🥶 {outsider}"
-    ]
+# =====================
+# STATS
+# =====================
+def update_stats(prono, arrivee):
+    stats = load_stats()
+    placed = 0
+    for p in prono:
+        num = p.split(" – ")[0]
+        if num in arrivee[:3]:  # top 3 placés
+            placed += 1
+    stats.append({"date": datetime.now().isoformat(), "placed": placed / len(prono)})
+    # garder les 30 derniers jours
+    cutoff = datetime.now() - timedelta(days=30)
+    stats = [s for s in stats if datetime.fromisoformat(s["date"]) >= cutoff]
+    save_stats(stats)
+    if stats:
+        return round(sum(s["placed"] for s in stats)/len(stats)*100)
+    return 0
 
 # =====================
 # MAIN
@@ -131,9 +140,14 @@ def main():
     sent = load_sent()
     now = datetime.now(ZoneInfo("Europe/Paris"))
 
+    print("🕒 Heure Paris :", now.strftime("%H:%M"))
+    print("🔎 Chargement de la page principale...")
+
     resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
     rows = soup.find_all("tr", class_="clickable-row")
+
+    print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
     for row in rows:
         try:
@@ -141,54 +155,37 @@ def main():
             if not course_id or course_id in sent:
                 continue
 
-            td_num = row.select_one("td.td1")
-            td_name = row.select_one("td.td2 div.TdTitre")
-            td_time = row.select_one("td.td3")
-
-            if not td_num or not td_name or not td_time:
-                continue
-
-            course_num = td_num.get_text(strip=True)
-            course_name = td_name.get_text(strip=True)
-            heure_txt = td_time.get_text(strip=True)
-
-            # Heure
-            try:
-                heure_course = datetime.strptime(heure_txt.replace("h", ":"), "%H:%M")
-                heure_course = heure_course.replace(
-                    year=now.year, month=now.month, day=now.day, tzinfo=ZoneInfo("Europe/Paris")
-                )
-            except:
-                continue
-
-            # ⏱️ 10 minutes avant
-            if not (heure_course - timedelta(minutes=10) <= now <= heure_course):
-                continue
-
+            course_num = row.select_one("td.td1").get_text(strip=True)
+            course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
             link = row.get("data-href")
-            hippodrome = "N/A"
+            hipp_name = "N/A"
             if link and "_" in link:
-                hippodrome = link.split("_")[1].split("/")[0].replace("-", " ").title()
+                hipp_name = link.split("_")[1].split("/")[0].capitalize()
+
+            heure_txt = row.select_one("td.td3").get_text(strip=True)
+            # calcul 10 min avant la course
+            heure_course = datetime.strptime(heure_txt, "%Hh%M")
+            delta = (heure_course - now).total_seconds()
+            if delta > 600:  # ignore si > 10 min avant
+                continue
 
             allocation, distance, partants, chevaux, arrivee = get_course_detail(link)
             if not chevaux:
                 continue
 
-            prono = generate_prono(chevaux)
-
-            # calcul % réussite
-            pct = update_stats(prono, arrivee)
+            pronostic = generate_ia(chevaux)
+            pct = update_stats(pronostic, arrivee)
 
             message = (
-                "🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
-                f"🏟 Réunion {hippodrome} - {course_num}\n"
+                f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
+                f"🏟 Réunion {hipp_name} - {course_num}\n"
                 f"📍 {course_name}\n"
                 f"⏰ Départ : {heure_txt}\n"
                 f"💰 Allocation : {allocation}\n"
                 f"📏 Distance : {distance}\n"
                 f"👥 Partants : {partants}\n\n"
-                "👉 Pronostic IA\n"
-                + "\n".join(prono) +
+                "👉 Pronostic IA\n" +
+                "\n".join(pronostic) +
                 f"\n\n📊 Ce bot affiche {pct}% de chevaux placés sur les 30 derniers jours"
                 "\n🔞 Jeu responsable – Analyse automatisée"
             )

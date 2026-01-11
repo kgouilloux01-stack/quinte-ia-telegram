@@ -1,10 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
 import random
 import os
+import subprocess
 
 # =====================
 # CONFIG TELEGRAM
@@ -41,6 +42,17 @@ def load_sent():
 def save_sent(sent):
     with open(SENT_FILE, "w") as f:
         json.dump(sent, f)
+
+def git_commit_sent():
+    try:
+        subprocess.run(["git", "config", "--local", "user.email", "action@github.com"], check=True)
+        subprocess.run(["git", "config", "--local", "user.name", "GitHub Action"], check=True)
+        subprocess.run(["git", "add", SENT_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update sent.json after sending pronostic"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("✅ sent.json commité et pushé")
+    except subprocess.CalledProcessError as e:
+        print("❌ Erreur git :", e)
 
 # =====================
 # SCRAP DETAIL COURSE
@@ -106,8 +118,10 @@ def main():
         print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
         if not rows:
-            print("❌ Aucune course trouvée, la page peut ne pas être chargée correctement")
+            print("❌ Aucune course trouvée")
             return
+
+        new_sent = False
 
         for row in rows:
             try:
@@ -155,10 +169,14 @@ def main():
 
                     send_telegram(message)
                     sent.append(course_id)
-                    save_sent(sent)
+                    new_sent = True
 
             except Exception as e:
                 print("❌ Erreur course :", e)
+
+        if new_sent:
+            save_sent(sent)
+            git_commit_sent()
 
     except Exception as e:
         print("❌ Erreur page principale :", e)

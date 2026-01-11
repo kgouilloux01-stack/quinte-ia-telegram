@@ -151,7 +151,8 @@ def main():
                 )
 
                 delta_min = int((heure_course - now).total_seconds() / 60)
-                if delta_min == 10:
+                # ✅ Intervalle 10-15 min avant le départ
+                if 10 <= delta_min <= 15:
                     allocation, distance, partants, chevaux = get_course_detail(link)
                     if not chevaux:
                         continue

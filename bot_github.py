@@ -68,10 +68,9 @@ def get_course_detail(link):
             num = row.select_one("td:nth-child(1)").get_text(strip=True)
             nom_td = row.select_one("td:nth-child(2)")
             if nom_td:
-                # Cherche juste le nom propre du cheval
                 nom_span = nom_td.find(["div", "span"])
                 nom_clean = nom_span.get_text(strip=True) if nom_span else nom_td.get_text(strip=True)
-                # Supprime performances type 6p9p5p8p0p
+                # Supprime les performances type 6p9p5p8p0p
                 nom_clean = re.split(r'\s\d+p?', nom_clean)[0].strip()
                 if nom_clean:
                     chevaux.append(f"{num} – {nom_clean}")
@@ -95,6 +94,7 @@ def generate_ia(chevaux):
 # =====================
 def main():
     sent = load_sent()
+    pending_send = set()  # Pour éviter les doubles envois dans le même run
 
     while True:
         now = datetime.now(ZoneInfo("Europe/Paris"))
@@ -110,7 +110,7 @@ def main():
             for row in rows:
                 try:
                     course_id = row.get("id")
-                    if not course_id or course_id in sent:
+                    if not course_id or course_id in sent or course_id in pending_send:
                         continue
 
                     # Infos course
@@ -129,7 +129,7 @@ def main():
 
                     delta_min = (heure_course - now).total_seconds() / 60
 
-                    # Envoyer le pronostic entre 7 et 30 min avant la course
+                    # Envoi pronostic 7 à 30 minutes avant la course
                     if 7 <= delta_min <= 30:
                         allocation, distance, partants, chevaux = get_course_detail(link)
                         if not chevaux:
@@ -151,6 +151,7 @@ def main():
                         )
 
                         send_telegram(message)
+                        pending_send.add(course_id)
                         sent.append(course_id)
                         save_sent(sent)
 

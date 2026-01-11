@@ -2,7 +2,7 @@ name: Quinté Bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # toutes les 5 minutes
+    - cron: "*/1 * * * *"   # toutes les 1 minute pour ne rien rater
   workflow_dispatch:
 
 jobs:
@@ -19,4 +19,4 @@ jobs:
         run: pip install requests beautifulsoup4
 
       - name: Run bot
-        run: python bot.py
+        run: python bot_github.py

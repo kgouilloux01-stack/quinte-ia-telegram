@@ -1,19 +1,19 @@
-name: Quinte IA Telegram
+name: Bot Quinte IA
 
 on:
   schedule:
-    # toutes les minutes
-    - cron: '* * * * *'
-  workflow_dispatch:
+    - cron: '*/1 * * * *'  # toutes les minutes
+  workflow_dispatch:  # permet de lancer manuellement si besoin
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: 3.11
@@ -21,10 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests beautifulsoup4 zoneinfo
 
       - name: Run bot
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
         run: python bot.py

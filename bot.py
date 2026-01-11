@@ -66,7 +66,6 @@ def get_course_detail(link):
         try:
             num = row.select_one("td:nth-child(1)").get_text(strip=True)
             nom_td = row.select_one("td:nth-child(2)")
-            # Nettoyage complet du texte + suppression des performances (25)…
             nom = " ".join(nom_td.stripped_strings) if nom_td else ""
             if nom:
                 nom_clean = nom.split("(")[0].strip()
@@ -77,7 +76,7 @@ def get_course_detail(link):
     return allocation, distance, partants, chevaux
 
 # =====================
-# GENERER UN PRONOSTIC IA (TEST)
+# GENERER UN PRONOSTIC IA
 # =====================
 def generate_ia(chevaux):
     if not chevaux:
@@ -121,13 +120,14 @@ def main():
 
                     # Heure
                     heure_txt = row.select_one("td.td3").get_text(strip=True)
+                    # Exemple : "15h30"
                     heure_course = datetime.strptime(heure_txt, "%Hh%M").replace(
                         year=now.year, month=now.month, day=now.day, tzinfo=ZoneInfo("Europe/Paris")
                     )
 
-                    # Envoyer le pronostic 10 min avant la course
-                    delta_min = (heure_course - now).total_seconds() / 60
-                    if 10 <= delta_min <= 15:
+                    # Envoie exactement 10 minutes avant
+                    delta_min = int((heure_course - now).total_seconds() / 60)
+                    if delta_min == 10:
                         allocation, distance, partants, chevaux = get_course_detail(link)
                         if not chevaux:
                             continue

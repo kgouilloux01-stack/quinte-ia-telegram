@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 import json
 import random
 import os
-import time
 
 # =====================
 # CONFIG TELEGRAM
@@ -16,7 +15,8 @@ CHANNEL_ID = -1003505856903
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SENT_FILE = "sent.json"
-RESULTS_FILE = "results.json"
+RESULTS_FILE = "results.json"  # Pour stocker les arrivées et calculer %
+TOP_PLACES = 5  # Top chevaux considérés comme placés
 
 # =====================
 # TELEGRAM
@@ -31,7 +31,7 @@ def send_telegram(message):
     print("📨 Telegram status:", r.status_code)
 
 # =====================
-# SENT MANAGEMENT
+# GESTION DES COURSES ENVOYEES
 # =====================
 def load_sent():
     if os.path.exists(SENT_FILE):
@@ -44,7 +44,7 @@ def save_sent(sent):
         json.dump(sent, f)
 
 # =====================
-# RESULTATS ARRIVEES
+# GESTION DES RESULTATS
 # =====================
 def load_results():
     if os.path.exists(RESULTS_FILE):
@@ -56,27 +56,34 @@ def save_results(results):
     with open(RESULTS_FILE, "w") as f:
         json.dump(results, f)
 
-def update_results(course_id, pronostic, arrivée):
+def update_results(course_id, pronostic, arrivee_officielle):
     results = load_results()
-    results.append({"id": course_id, "pronostic": pronostic, "arrivée": arrivée})
-    # garder seulement 30 derniers jours
-    now = datetime.now(ZoneInfo("Europe/Paris"))
-    results = [r for r in results if datetime.strptime(r["id"].split("_")[0], "%d%m%Y").date() >= (now - timedelta(days=30)).date()]
+    # Extraire top chevaux arrivés
+    arrivee_list = [x.strip() for x in arrivee_officielle.split("-")][:TOP_PLACES]
+    placés = 0
+    for p in pronostic:
+        num = p.split("–")[0].strip()
+        if num in arrivee_list:
+            placés += 1
+    pourcentage = round((placés / len(pronostic)) * 100)
+    results.append({
+        "date": datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d"),
+        "course_id": course_id,
+        "pronostic": pronostic,
+        "arrivee": arrivee_officielle,
+        "placés": placés,
+        "pourcentage": pourcentage
+    })
+    # Garder uniquement les 30 derniers jours
+    today = datetime.now(ZoneInfo("Europe/Paris")).date()
+    results = [r for r in results if datetime.fromisoformat(r["date"]).date() >= today - timedelta(days=30)]
     save_results(results)
-
-def calculate_success_rate():
-    results = load_results()
-    total = 0
-    placed = 0
-    for r in results:
-        for cheval in r["pronostic"]:
-            num = cheval.split(" – ")[0]
-            if num in r["arrivée"]:
-                placed += 1
-            total += 1
-    if total == 0:
-        return 0
-    return int((placed / total) * 100)
+    # Calcul global %
+    if results:
+        total_placés = sum(r["placés"] for r in results)
+        total_chevaux = sum(len(r["pronostic"]) for r in results)
+        return round((total_placés / total_chevaux) * 100)
+    return 0
 
 # =====================
 # SCRAP DETAIL COURSE
@@ -105,32 +112,30 @@ def get_course_detail(link):
         try:
             num = row.select_one("td:nth-child(1)").get_text(strip=True)
             nom_td = row.select_one("td:nth-child(2)")
-            # SUPPRIME les performances et ne garde que le nom
-            nom = " ".join(nom_td.stripped_strings).split("(")[0].strip() if nom_td else ""
+            nom = " ".join(nom_td.stripped_strings) if nom_td else ""
             if nom:
                 chevaux.append(f"{num} – {nom}")
         except:
             continue
 
     # Arrivée officielle si disponible
-    arrivée_div = soup.select_one("h2.titre_arrivee_officiel div")
-    arrivée = []
-    if arrivée_div:
-        arrivée = [n.strip() for n in arrivée_div.get_text().split("-")]
-    return allocation, distance, partants, chevaux, arrivée
+    arrivee_officielle = None
+    h2 = soup.select_one("h2.titre_arrivee_officiel div")
+    if h2:
+        arrivee_officielle = h2.get_text(strip=True)
+
+    return allocation, distance, partants, chevaux, arrivee_officielle
 
 # =====================
-# GENERER UN PRONOSTIC IA (Favori, Tocard, Outsider)
+# GENERER UN PRONOSTIC IA (favori, tocard, outsider)
 # =====================
 def generate_ia(chevaux):
     if not chevaux:
         return []
-    # Méthode simple: favori = premier petit numéro, tocard = milieu, outsider = plus grand
-    chevaux_sorted = sorted(chevaux, key=lambda x: int(x.split(" – ")[0]))
-    fav = chevaux_sorted[0]
-    toc = chevaux_sorted[len(chevaux_sorted)//2]
-    out = chevaux_sorted[-1]
-    return [f"😎 {fav}", f"🤔 {toc}", f"🥶 {out}"]
+    favoris = [chevaux[0]] if len(chevaux) >= 1 else []
+    tocards = [chevaux[1]] if len(chevaux) >= 2 else []
+    outsiders = [chevaux[-1]] if len(chevaux) >= 3 else []
+    return favoris + tocards + outsiders
 
 # =====================
 # MAIN
@@ -152,46 +157,26 @@ def main():
             if not course_id or course_id in sent:
                 continue
 
-            # Date de la course
-            date_txt = row.select_one("td.td_date").get_text(strip=True)  # ex: "11/01/2026"
-            course_date = datetime.strptime(date_txt, "%d/%m/%Y").date()
-            if course_date != now.date():
-                continue  # ignore les courses pas d'aujourd'hui
-
-            # Numéro de la course
+            # Numéro et nom
             course_num = row.select_one("td.td1").get_text(strip=True)
-            # Nom de la course
             course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
-            # Hippodrome → récupérer depuis data-href
             link = row.get("data-href")
             hipp_name = "N/A"
             if link and "_" in link:
                 hipp_name = link.split("_")[1].split("/")[0].capitalize()
-
-            # Heure
             heure_txt = row.select_one("td.td3").get_text(strip=True)
-            course_datetime = datetime.combine(course_date, datetime.strptime(heure_txt, "%Hh%M").time(), tzinfo=ZoneInfo("Europe/Paris"))
-
-            # Envoi 10 minutes avant
-            delay = (course_datetime - timedelta(minutes=10)) - now
-            if delay.total_seconds() > 0:
-                print(f"⏳ Envoi prévu pour {delay.total_seconds()/60:.1f} minutes")
-                time.sleep(delay.total_seconds())
 
             # Détails course
-            allocation, distance, partants, chevaux, arrivée = get_course_detail(link)
+            allocation, distance, partants, chevaux, arrivee_officielle = get_course_detail(link)
             if not chevaux:
                 continue
 
-            # Pronostic IA
             pronostic = generate_ia(chevaux)
 
-            # Sauvegarde pour suivi résultats
-            if arrivée:
-                update_results(course_id, pronostic, arrivée)
-
-            # Calcul % réussite
-            pct = calculate_success_rate()
+            # Si arrivée officielle dispo, mettre à jour % automatique
+            pourcentage = 0
+            if arrivee_officielle:
+                pourcentage = update_results(course_id, pronostic, arrivee_officielle)
 
             message = (
                 f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
@@ -202,9 +187,9 @@ def main():
                 f"📏 Distance : {distance}\n"
                 f"👥 Partants : {partants}\n\n"
                 "👉 Pronostic IA\n" +
-                "\n".join(pronostic) +
-                f"\n\n📊 Ce bot affiche {pct}% de chevaux placés sur les 30 derniers jours"
-                "\n🔞 Jeu responsable – Analyse automatisée"
+                "\n".join([f"{['😎','🤔','🥶'][i]} {pronostic[i]}" for i in range(len(pronostic))]) +
+                f"\n\n📊 Ce bot affiche {pourcentage}% de chevaux placés sur les 30 derniers jours\n"
+                "🔞 Jeu responsable – Analyse automatisée"
             )
 
             send_telegram(message)

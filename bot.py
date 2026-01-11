@@ -1,10 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import json
 import random
 import os
+import time
 
 # =====================
 # CONFIG TELEGRAM
@@ -65,19 +66,11 @@ def get_course_detail(link):
         try:
             num = row.select_one("td:nth-child(1)").get_text(strip=True)
             nom_td = row.select_one("td:nth-child(2)")
-
-            # ⚡ MODIF : ne prendre que le nom du cheval, pas les performances
-            if nom_td:
-                # Cherche un span ou div qui contient juste le nom
-                nom_span = nom_td.find(["div", "span"])
-                nom = nom_span.get_text(strip=True) if nom_span else nom_td.get_text(strip=True)
-                # Nettoyage rapide pour enlever tout entre parenthèses
-                nom = nom.split("(")[0].strip()
-            else:
-                nom = ""
-
+            # Nettoyage complet du texte + suppression des performances (25)…
+            nom = " ".join(nom_td.stripped_strings) if nom_td else ""
             if nom:
-                chevaux.append(f"{num} – {nom}")
+                nom_clean = nom.split("(")[0].strip()
+                chevaux.append(f"{num} – {nom_clean}")
         except:
             continue
 
@@ -94,67 +87,78 @@ def generate_ia(chevaux):
     return [f"{emojis[i]} {pronostic[i]}" for i in range(len(pronostic))]
 
 # =====================
-# MAIN TEST
+# MAIN LOOP INFINIE
 # =====================
 def main():
     sent = load_sent()
-    now = datetime.now(ZoneInfo("Europe/Paris"))
 
-    print("🕒 Heure Paris :", now.strftime("%H:%M"))
-    print("🔎 Chargement de la page principale...")
+    while True:
+        now = datetime.now(ZoneInfo("Europe/Paris"))
+        print("🕒 Heure Paris :", now.strftime("%H:%M"))
+        print("🔎 Chargement de la page principale...")
 
-    resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    rows = soup.find_all("tr", class_="clickable-row")
-
-    print(f"🔎 {len(rows)} courses trouvées sur la page principale")
-
-    for row in rows:
         try:
-            course_id = row.get("id")
-            if not course_id or course_id in sent:
-                continue
+            resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
+            soup = BeautifulSoup(resp.text, "html.parser")
+            rows = soup.find_all("tr", class_="clickable-row")
+            print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
-            # Numéro de la course
-            course_num = row.select_one("td.td1").get_text(strip=True)
-            # Nom de la course
-            course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
-            # Hippodrome → récupérer depuis data-href
-            link = row.get("data-href")
-            hipp_name = "N/A"
-            if link and "_" in link:
-                hipp_name = link.split("_")[1].split("/")[0].capitalize()
+            for row in rows:
+                try:
+                    course_id = row.get("id")
+                    if not course_id or course_id in sent:
+                        continue
 
-            # Heure
-            heure_txt = row.select_one("td.td3").get_text(strip=True)
+                    # Numéro de la course
+                    course_num = row.select_one("td.td1").get_text(strip=True)
+                    # Nom de la course
+                    course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
+                    # Hippodrome → récupérer depuis data-href
+                    link = row.get("data-href")
+                    hipp_name = "N/A"
+                    if link and "_" in link:
+                        hipp_name = link.split("_")[1].split("/")[0].capitalize()
 
-            # Détails course
-            allocation, distance, partants, chevaux = get_course_detail(link)
-            if not chevaux:
-                continue
+                    # Heure
+                    heure_txt = row.select_one("td.td3").get_text(strip=True)
+                    heure_course = datetime.strptime(heure_txt, "%Hh%M").replace(
+                        year=now.year, month=now.month, day=now.day, tzinfo=ZoneInfo("Europe/Paris")
+                    )
 
-            # Pronostic IA
-            pronostic = generate_ia(chevaux)
+                    # Envoyer le pronostic 10 min avant la course
+                    delta_min = (heure_course - now).total_seconds() / 60
+                    if 10 <= delta_min <= 15:
+                        allocation, distance, partants, chevaux = get_course_detail(link)
+                        if not chevaux:
+                            continue
 
-            message = (
-                f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
-                f"🏟 Réunion {hipp_name} - {course_num}\n"
-                f"📍 {course_name}\n"
-                f"⏰ Départ : {heure_txt}\n"
-                f"💰 Allocation : {allocation}\n"
-                f"📏 Distance : {distance}\n"
-                f"👥 Partants : {partants}\n\n"
-                "👉 Pronostic IA\n" +
-                "\n".join(pronostic) +
-                "\n\n🔞 Jeu responsable – Analyse automatisée"
-            )
+                        pronostic = generate_ia(chevaux)
 
-            send_telegram(message)
-            sent.append(course_id)
-            save_sent(sent)
+                        message = (
+                            f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
+                            f"🏟 Réunion {hipp_name} - {course_num}\n"
+                            f"📍 {course_name}\n"
+                            f"⏰ Départ : {heure_txt}\n"
+                            f"💰 Allocation : {allocation}\n"
+                            f"📏 Distance : {distance}\n"
+                            f"👥 Partants : {partants}\n\n"
+                            "👉 Pronostic IA\n" +
+                            "\n".join(pronostic) +
+                            "\n\n🔞 Jeu responsable – Analyse automatisée"
+                        )
+
+                        send_telegram(message)
+                        sent.append(course_id)
+                        save_sent(sent)
+
+                except Exception as e:
+                    print("❌ Erreur course :", e)
 
         except Exception as e:
-            print("❌ Erreur course :", e)
+            print("❌ Erreur page principale :", e)
+
+        # Vérifie toutes les 60 secondes
+        time.sleep(60)
 
 if __name__ == "__main__":
     main()

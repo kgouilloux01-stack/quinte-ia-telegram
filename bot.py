@@ -101,7 +101,7 @@ def main():
             delta = (race_time - now).total_seconds() / 60
 
             # 🎯 ENVOI UNIQUEMENT 10–15 MIN AVANT
-            if not (10 <= delta <= 15):
+            if not (60 <= delta <= 300):
                 continue
 
             link_tag = row.select_one("td:nth-child(2) a")

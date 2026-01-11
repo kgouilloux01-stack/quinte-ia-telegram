@@ -2,7 +2,7 @@ import requests
 import json
 import os
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # =====================
 # CONFIG
@@ -19,12 +19,16 @@ SENT_FILE = "sent.json"
 # =====================
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    r = requests.post(url, data={
-        "chat_id": CHANNEL_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    })
-    print("📨 Telegram:", r.status_code)
+    r = requests.post(
+        url,
+        data={
+            "chat_id": CHANNEL_ID,
+            "text": message,
+            "parse_mode": "Markdown"
+        },
+        timeout=10
+    )
+    print("📨 Telegram status:", r.status_code)
 
 # =====================
 # UTILS
@@ -43,27 +47,30 @@ def save_sent(sent):
 # COURSE DETAIL
 # =====================
 def get_course_detail(url):
-    soup = BeautifulSoup(requests.get(url, headers=HEADERS).text, "html.parser")
+    r = requests.get(url, headers=HEADERS, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
 
     allocation = distance = partants = "N/A"
+
     info = soup.select_one("div.InfosCourse")
     if info:
         txt = info.get_text(" ", strip=True)
+
         if "Allocation" in txt:
             allocation = txt.split("Allocation")[1].split("-")[0].replace(":", "").strip()
+
         if "Distance" in txt:
             distance = txt.split("Distance")[1].split("-")[0].replace(":", "").strip()
+
         if "Partants" in txt:
-            partants = txt.split("Partants")[0].split("-")[-1].strip()
+            partants = txt.split("Partants")[-1].strip()
 
     chevaux = []
     for row in soup.select(".TablePartantDesk tbody tr"):
-        try:
-            num = row.select_one("td:nth-child(1)").get_text(strip=True)
-            nom = row.select_one("td:nth-child(2)").get_text(strip=True)
-            chevaux.append(f"{num} - {nom}")
-        except:
-            pass
+        num = row.select_one("td:nth-child(1)")
+        nom = row.select_one("td:nth-child(2)")
+        if num and nom:
+            chevaux.append(f"{num.get_text(strip=True)} - {nom.get_text(strip=True)}")
 
     return allocation, distance, partants, chevaux
 
@@ -72,36 +79,36 @@ def get_course_detail(url):
 # =====================
 def main():
     sent = load_sent()
+
     today = datetime.now().strftime("%d%m%Y")
     url = f"{BASE_URL}{today}/"
 
-    soup = BeautifulSoup(requests.get(url, headers=HEADERS).text, "html.parser")
+    print("🔎 Chargement:", url)
+
+    r = requests.get(url, headers=HEADERS, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
+
     rows = soup.find_all("tr", id=lambda x: x and x.startswith("courseId_"))
 
-    now = datetime.now()
+    if not rows:
+        print("❌ Aucune course trouvée")
+        return
 
-    for row in rows:
+    for row in rows[:1]:  # 🔥 FORCE : UNE COURSE SUFFIT POUR TEST
         try:
             course_id = row["id"]
 
-            if course_id in sent:
-                continue
-
+            # ❌ ON IGNORE L'HISTORIQUE POUR FORCER L'ENVOI
             nom = row.select_one("td:nth-child(2)").get_text(strip=True)
             heure_txt = row.select_one("td:nth-child(3)").get_text(strip=True)
             hippodrome = row.select_one("td:nth-child(4)").get_text(strip=True)
 
-            race_time = datetime.strptime(heure_txt, "%Hh%M").replace(
-                year=now.year, month=now.month, day=now.day
-            )
-
-            delta = (race_time - now).total_seconds() / 60
-
-            # 🎯 FENÊTRE 10–15 MIN
-            if not (60 <= delta <= 300):
+            link_tag = row.select_one("td:nth-child(2) a")
+            if not link_tag:
+                print("❌ Pas de lien course")
                 continue
 
-            link = row.select_one("td:nth-child(2) a")["href"]
+            link = link_tag["href"]
             if link.startswith("/"):
                 link = "https://www.coin-turf.fr" + link
 
@@ -121,11 +128,13 @@ def main():
             )
 
             send_telegram(message)
+            print("✅ Message envoyé")
+
             sent.append(course_id)
             save_sent(sent)
 
         except Exception as e:
-            print("Erreur course:", e)
+            print("❌ Erreur course:", e)
 
 # =====================
 if __name__ == "__main__":

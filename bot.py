@@ -98,7 +98,7 @@ def main():
             delta = (race_time - now).total_seconds() / 60
 
             # 🎯 FENÊTRE 10–15 MIN
-            if not (10 <= delta <= 15):
+            if not (60 <= delta <= 300):
                 continue
 
             link = row.select_one("td:nth-child(2) a")["href"]

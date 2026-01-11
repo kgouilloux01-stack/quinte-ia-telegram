@@ -90,8 +90,9 @@ def main():
             year=now.year, month=now.month, day=now.day, tzinfo=PARIS_TZ
         )
 
-        if not timedelta(minutes=0) <= (race_time - now) <= timedelta(minutes=10):
-            continue
+        # MODE TEST — ENVOI FORCÉ
+pass
+
 
         course_num = row.select_one("td.td1").get_text(strip=True)
         course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)

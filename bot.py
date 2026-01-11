@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 import json
 import random
 import os
-import re
 
 # =====================
 # CONFIG TELEGRAM
@@ -50,50 +49,44 @@ def get_course_detail(link):
     info = soup.select_one("div.InfosCourse")
     if info:
         txt = info.get_text(" ", strip=True)
-        allocation = re.search(r"Allocation\s*:?\s*([\d\s]+€)", txt)
-        distance = re.search(r"Distance\s*:?\s*([\d\s]+m)", txt)
-        partants = re.search(r"Partants\s*:?\s*(\d+)", txt)
-
-        allocation = allocation.group(1) if allocation else "N/A"
-        distance = distance.group(1) if distance else "N/A"
-        partants = partants.group(1) if partants else "N/A"
+        if "Allocation" in txt:
+            allocation = txt.split("Allocation")[1].split("-")[0].replace(":", "").strip()
+        if "Distance" in txt:
+            distance = txt.split("Distance")[1].split("-")[0].replace(":", "").strip()
+        if "Partants" in txt:
+            partants = txt.split("Partants")[0].split("-")[-1].strip()
 
     chevaux = []
     rows = soup.select(".TablePartantDesk tbody tr")
-
     for row in rows:
-        try:
-            num = row.select_one("td:nth-child(1)").get_text(strip=True)
-            nom_td = row.select_one("td:nth-child(2)")
-            nom = nom_td.get_text(" ", strip=True)
-
-            # 🔥 SUPPRESSION TOTALE DES PERFORMANCES
-            nom = re.split(r"\(\d{2}\)", nom)[0]
-            nom = re.sub(r"[0-9apmhd]+", "", nom).strip()
-
-            if nom:
-                chevaux.append(f"{num} – {nom}")
-        except:
+        td_num = row.select_one("td:nth-child(1)")
+        td_nom = row.select_one("td:nth-child(2)")
+        if not td_num or not td_nom:
             continue
+
+        num = td_num.get_text(strip=True)
+        nom = td_nom.get_text(" ", strip=True)
+
+        # 🔥 SUPPRESSION TOTALE DES PERFORMANCES
+        nom = nom.split("(")[0].strip()
+
+        chevaux.append(f"{num} – {nom}")
 
     return allocation, distance, partants, chevaux
 
 # =====================
-# PRONOSTIC IA LOGIQUE
+# PRONOSTIC IA SIMPLE & PROPRE
 # =====================
-def generate_ia(chevaux):
+def generate_prono(chevaux):
     if len(chevaux) < 3:
         return []
 
-    favoris = chevaux[:5]
-    petits_nums = chevaux[:8]
-
-    favori = random.choice(favoris)
-    outsider = random.choice(petits_nums)
-    tocard = random.choice(chevaux[8:]) if len(chevaux) > 8 else random.choice(chevaux)
+    base = chevaux[0]
+    tocard = random.choice(chevaux[1:])
+    outsider = random.choice(chevaux[1:])
 
     return [
-        f"😎 {favori}",
+        f"😎 {base}",
         f"🤔 {tocard}",
         f"🥶 {outsider}"
     ]
@@ -105,8 +98,6 @@ def main():
     sent = load_sent()
     now = datetime.now(ZoneInfo("Europe/Paris"))
 
-    print("🕒 Heure Paris :", now.strftime("%H:%M"))
-
     resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
     rows = soup.find_all("tr", class_="clickable-row")
@@ -117,40 +108,51 @@ def main():
             if not course_id or course_id in sent:
                 continue
 
-            course_num = row.select_one("td.td1").get_text(strip=True)
-            course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
+            td_num = row.select_one("td.td1")
+            td_name = row.select_one("td.td2 div.TdTitre")
+            td_time = row.select_one("td.td3")
+
+            if not td_num or not td_name or not td_time:
+                continue
+
+            course_num = td_num.get_text(strip=True)
+            course_name = td_name.get_text(strip=True)
+            heure_txt = td_time.get_text(strip=True)
+
+            # Heure
+            try:
+                heure_course = datetime.strptime(heure_txt.replace("h", ":"), "%H:%M")
+                heure_course = heure_course.replace(
+                    year=now.year, month=now.month, day=now.day, tzinfo=ZoneInfo("Europe/Paris")
+                )
+            except:
+                continue
+
+            # ⏱️ 10 minutes avant
+            if not (heure_course - timedelta(minutes=10) <= now <= heure_course):
+                continue
 
             link = row.get("data-href")
-            hipp_name = "N/A"
+            hippodrome = "N/A"
             if link and "_" in link:
-                hipp_name = link.split("_")[1].split("/")[0].replace("-", " ").title()
-
-            heure_txt = row.select_one("td.td3").get_text(strip=True)
-            heure_course = datetime.strptime(heure_txt, "%Hh%M").replace(
-                year=now.year, month=now.month, day=now.day,
-                tzinfo=ZoneInfo("Europe/Paris")
-            )
-
-            # ⏱️ ENVOI 10 MIN AVANT
-            if not (timedelta(minutes=0) <= heure_course - now <= timedelta(minutes=10)):
-                continue
+                hippodrome = link.split("_")[1].split("/")[0].replace("-", " ").title()
 
             allocation, distance, partants, chevaux = get_course_detail(link)
             if not chevaux:
                 continue
 
-            pronostic = generate_ia(chevaux)
+            prono = generate_prono(chevaux)
 
             message = (
-                f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
-                f"🏟 Réunion {hipp_name} - {course_num}\n"
+                "🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
+                f"🏟 Réunion {hippodrome} - {course_num}\n"
                 f"📍 {course_name}\n"
                 f"⏰ Départ : {heure_txt}\n"
                 f"💰 Allocation : {allocation}\n"
                 f"📏 Distance : {distance}\n"
                 f"👥 Partants : {partants}\n\n"
                 "👉 Pronostic IA\n"
-                + "\n".join(pronostic) +
+                + "\n".join(prono) +
                 "\n\n🔞 Jeu responsable – Analyse automatisée"
             )
 

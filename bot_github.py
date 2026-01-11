@@ -13,7 +13,11 @@ TELEGRAM_TOKEN = "8369079857:AAEWv0p3PDNUmx1qoJWhTejU1ED1WPApqd4"
 CHANNEL_ID = -1003505856903
 
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/117.0.0.0 Safari/537.36"
+}
 SENT_FILE = "sent.json"
 
 # =====================
@@ -45,7 +49,8 @@ def get_course_detail(link):
     if link.startswith("/"):
         link = "https://www.coin-turf.fr" + link
 
-    soup = BeautifulSoup(requests.get(link, headers=HEADERS).text, "html.parser")
+    resp = requests.get(link, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(resp.text, "html.parser")
 
     allocation = distance = partants = "N/A"
     info = soup.select_one("div.InfosCourse")
@@ -58,18 +63,20 @@ def get_course_detail(link):
         if "Partants" in txt:
             partants = txt.split("Partants")[0].split("-")[-1].strip()
 
-    # Chevaux
     chevaux = []
     rows = soup.select(".TablePartantDesk tbody tr")
     for row in rows:
         try:
-            num = row.select_one("td:nth-child(1)").get_text(strip=True)
+            num_td = row.select_one("td:nth-child(1)")
+            num = num_td.get_text(strip=True) if num_td else "N/A"
+
             nom_td = row.select_one("td:nth-child(2)")
             nom = " ".join(nom_td.stripped_strings) if nom_td else ""
             if nom:
                 nom_clean = nom.split("(")[0].strip()
                 chevaux.append(f"{num} – {nom_clean}")
-        except:
+        except Exception as e:
+            print("❌ Erreur cheval:", e)
             continue
 
     return allocation, distance, partants, chevaux
@@ -98,27 +105,34 @@ def main():
         rows = soup.find_all("tr", class_="clickable-row")
         print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
+        if not rows:
+            print("❌ Aucune course trouvée, la page peut ne pas être chargée correctement")
+            return
+
         for row in rows:
             try:
                 course_id = row.get("id")
                 if not course_id or course_id in sent:
                     continue
 
-                # Numéro de la course
-                course_num = row.select_one("td.td1").get_text(strip=True)
-                course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
+                td_num = row.select_one("td.td1")
+                course_num = td_num.get_text(strip=True) if td_num else "N/A"
+
+                td_name = row.select_one("td.td2 div.TdTitre")
+                course_name = td_name.get_text(strip=True) if td_name else "N/A"
+
                 link = row.get("data-href")
                 hipp_name = "N/A"
                 if link and "_" in link:
                     hipp_name = link.split("_")[1].split("/")[0].capitalize()
 
-                heure_txt = row.select_one("td.td3").get_text(strip=True)
+                td_heure = row.select_one("td.td3")
+                heure_txt = td_heure.get_text(strip=True) if td_heure else "00h00"
                 heure_course = datetime.strptime(heure_txt, "%Hh%M").replace(
                     year=now.year, month=now.month, day=now.day, tzinfo=ZoneInfo("Europe/Paris")
                 )
 
                 delta_min = int((heure_course - now).total_seconds() / 60)
-                # Envoie uniquement si course dans 10 min
                 if delta_min == 10:
                     allocation, distance, partants, chevaux = get_course_detail(link)
                     if not chevaux:

@@ -50,12 +50,22 @@ def get_courses():
         for row in rows:
             course_id = row.get("id")
             course_nom = row.select_one("div.TdTitre").text.strip()
-            countdown = int(row.select_one("td.countdown")["data-countdown"])
-            # Conversion en datetime Paris
-            depart = datetime.fromtimestamp(countdown / 1000, tz=pytz.utc).astimezone(tz_paris)
+            
+            countdown_td = row.select_one("td.countdown")
+            if countdown_td and countdown_td.has_attr("data-countdown"):
+                try:
+                    countdown = int(countdown_td["data-countdown"])
+                    # Conversion en datetime Paris
+                    depart = datetime.fromtimestamp(countdown / 1000, tz=pytz.utc).astimezone(tz_paris)
+                except:
+                    continue  # impossible de lire le timestamp
+            else:
+                continue  # pas de countdown, ignore
             
             href = row.get("data-href")
-            
+            if not href:
+                continue  # pas de lien, ignore
+
             courses_list.append({
                 "course_id": course_id,
                 "reunion": reunion_nom,
@@ -71,7 +81,7 @@ def get_pronostic(course_url):
     
     # Récupère les chevaux (nom uniquement)
     chevaux = [td.text.strip() for td in soup.select("th.cheval")]
-    if not chevaux:  # fallback si coin-turf change le layout
+    if not chevaux:
         chevaux = [td.text.strip().split("\n")[0] for td in soup.select("td.td2 div.TdTitre")]
 
     # Pronostic Coin Turf (choix du jour)
@@ -112,7 +122,7 @@ def schedule_pronos():
         diff_seconds = (send_time - now).total_seconds()
 
         if diff_seconds <= 0:
-            # Si la course est déjà dans moins de 10 min ou passée, on peut l'envoyer directement
+            # Départ dans moins de 10 minutes ou passé → envoie direct
             send_pronostic(course)
         else:
             # Programmer avec schedule

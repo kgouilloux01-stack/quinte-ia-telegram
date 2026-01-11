@@ -2,7 +2,7 @@ name: Quinté Bot
 
 on:
   schedule:
-    - cron: "*/1 * * * *"   # toutes les 1 minute pour capter les courses à 10 min
+    - cron: "*/5 * * * *"   # toutes les 5 minutes
   workflow_dispatch:
 
 jobs:

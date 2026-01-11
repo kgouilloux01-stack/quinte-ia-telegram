@@ -73,9 +73,12 @@ def get_course_detail(link):
     rows = soup.select(".TablePartantDesk tbody tr")
     for row in rows:
         try:
-            num = row.select_one("td:nth-child(1)").get_text(strip=True)
+            num_td = row.select_one("td:nth-child(1)")
             nom_td = row.select_one("td:nth-child(2)")
-            nom = " ".join(nom_td.stripped_strings) if nom_td else ""
+            if not num_td or not nom_td:
+                continue
+            num = num_td.get_text(strip=True)
+            nom = " ".join(nom_td.stripped_strings)
             nom_clean = clean_nom(nom)
             if nom_clean:
                 chevaux.append(f"{num} – {nom_clean}")
@@ -138,8 +141,15 @@ def main():
                 continue
 
             # Heure
-            heure_txt = row.select_one("td.td3").get_text(strip=True)
-            heure_course = datetime.strptime(heure_txt, "%Hh%M")
+            heure_td = row.select_one("td.td3")
+            if not heure_td:
+                continue
+            heure_txt = heure_td.get_text(strip=True)
+            try:
+                heure_course = datetime.strptime(heure_txt, "%Hh%M")
+            except:
+                continue
+
             delta = (heure_course - now).total_seconds() / 60  # minutes
 
             # On n'envoie que 10-15 min avant
@@ -149,8 +159,12 @@ def main():
                 continue
 
             # Numéro et nom de la course
-            course_num = row.select_one("td.td1").get_text(strip=True)
-            course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
+            course_num_td = row.select_one("td.td1")
+            course_name_td = row.select_one("td.td2 div.TdTitre")
+            if not course_num_td or not course_name_td:
+                continue
+            course_num = course_num_td.get_text(strip=True)
+            course_name = course_name_td.get_text(strip=True)
 
             # Hippodrome
             link = row.get("data-href")

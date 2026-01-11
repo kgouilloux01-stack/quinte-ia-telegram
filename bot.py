@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import json
 import random
 import os
+import time
 
 # =====================
 # CONFIG TELEGRAM
@@ -29,33 +30,27 @@ def send_telegram(message):
     print("📨 Telegram status:", r.status_code)
 
 # =====================
-# LOAD/ SAVE
+# LOAD / SAVE
 # =====================
-def load_json(filename):
-    if os.path.exists(filename):
-        with open(filename, "r") as f:
+def load_sent():
+    if os.path.exists(SENT_FILE):
+        with open(SENT_FILE, "r") as f:
             return json.load(f)
     return []
 
-def save_json(filename, data):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=2)
+def save_sent(sent):
+    with open(SENT_FILE, "w") as f:
+        json.dump(sent, f)
 
-# =====================
-# CALCUL % CHEVAUX PLACES
-# =====================
-def calc_percentage(results):
-    now = datetime.now()
-    # filtre sur les 30 derniers jours
-    recent = [r for r in results if datetime.fromisoformat(r["date"]) > now - timedelta(days=30)]
-    if not recent:
-        return 0
-    placed = 0
-    for r in recent:
-        # check si un cheval pronostic est dans l'arrivée
-        if any(h in r["arrivee"] for h in r["pronostic"]):
-            placed += 1
-    return int((placed / len(recent)) * 100)
+def load_results():
+    if os.path.exists(RESULTS_FILE):
+        with open(RESULTS_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_results(results):
+    with open(RESULTS_FILE, "w") as f:
+        json.dump(results, f)
 
 # =====================
 # SCRAP DETAIL COURSE
@@ -85,8 +80,9 @@ def get_course_detail(link):
             num = row.select_one("td:nth-child(1)").get_text(strip=True)
             nom_td = row.select_one("td:nth-child(2)")
             nom = " ".join(nom_td.stripped_strings) if nom_td else ""
-            if nom:
-                chevaux.append(f"{num} – {nom}")
+            nom_clean = ''.join(c for c in nom if c.isalpha() or c.isspace()).strip()
+            if nom_clean:
+                chevaux.append(f"{num} – {nom_clean}")
         except:
             continue
 
@@ -94,7 +90,7 @@ def get_course_detail(link):
     arrivee = []
     h2 = soup.select_one("h2.titre_arrivee_officiel div")
     if h2:
-        arrivee = [int(x.strip()) for x in h2.get_text().split("–") if x.strip().isdigit()]
+        arrivee = [int(x.strip()) for x in h2.get_text().split("-") if x.strip().isdigit()]
 
     return allocation, distance, partants, chevaux, arrivee
 
@@ -106,7 +102,7 @@ def generate_ia(chevaux):
         return [], []
 
     favori = chevaux[0]
-    tocard = chevaux[-2] if len(chevaux) >= 2 else chevaux[-1]
+    tocard = chevaux[-1] if len(chevaux) > 1 else chevaux[0]
     outsider = chevaux[len(chevaux)//2]
 
     display = [
@@ -115,29 +111,43 @@ def generate_ia(chevaux):
         f"🥶 {outsider}"
     ]
 
-    calc = [
+    numbers = [
         int(favori.split(" – ")[0]),
         int(tocard.split(" – ")[0]),
         int(outsider.split(" – ")[0])
     ]
 
-    return display, calc
+    return display, numbers
 
 # =====================
-# MAIN
+# CALCUL % CHEVAUX PLACES
+# =====================
+def update_statistics(prono_numbers, arrivee):
+    results = load_results()
+    for n in prono_numbers:
+        placed = 1 if n in arrivee[:3] else 0
+        results.append({"date": datetime.now().isoformat(), "placed": placed})
+    # Garder 30 derniers jours
+    cutoff = datetime.now() - timedelta(days=30)
+    results = [r for r in results if datetime.fromisoformat(r["date"]) > cutoff]
+    save_results(results)
+    if results:
+        pct = round(100 * sum(r["placed"] for r in results) / len(results))
+    else:
+        pct = 0
+    return pct
+
+# =====================
+# MAIN LOOP
 # =====================
 def main():
-    sent = load_json(SENT_FILE)
-    results = load_json(RESULTS_FILE)
+    sent = load_sent()
     now = datetime.now()
-
     print("🕒 Heure Paris :", now.strftime("%H:%M"))
-    print("🔎 Chargement de la page principale...")
 
     resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
     rows = soup.find_all("tr", class_="clickable-row")
-
     print(f"🔎 {len(rows)} courses trouvées sur la page principale")
 
     for row in rows:
@@ -146,7 +156,6 @@ def main():
             if not course_id or course_id in sent:
                 continue
 
-            # Numéro et nom
             course_num = row.select_one("td.td1").get_text(strip=True)
             course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
             link = row.get("data-href")
@@ -155,24 +164,13 @@ def main():
                 hipp_name = link.split("_")[1].split("/")[0].capitalize()
             heure_txt = row.select_one("td.td3").get_text(strip=True)
 
-            # Détails course
             allocation, distance, partants, chevaux, arrivee = get_course_detail(link)
             if not chevaux:
                 continue
 
-            # Pronostic
-            display_prono, calc_prono = generate_ia(chevaux)
+            pronostic_display, pronostic_numbers = generate_ia(chevaux)
+            pct = update_statistics(pronostic_numbers, arrivee)
 
-            # Stockage suivi
-            results.append({
-                "course_id": course_id,
-                "pronostic": calc_prono,
-                "arrivee": arrivee,
-                "date": datetime.now().isoformat()
-            })
-            save_json(RESULTS_FILE, results)
-
-            # Envoi Telegram
             message = (
                 f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
                 f"🏟 Réunion {hipp_name} - {course_num}\n"
@@ -181,15 +179,15 @@ def main():
                 f"💰 Allocation : {allocation}\n"
                 f"📏 Distance : {distance}\n"
                 f"👥 Partants : {partants}\n\n"
-                "👉 Pronostic IA\n" +
-                "\n".join(display_prono) +
-                f"\n\n📊 Ce bot affiche {calc_percentage(results)}% de chevaux placés sur les 30 derniers jours"
-                "\n🔞 Jeu responsable – Analyse automatisée"
+                f"👉 Pronostic IA\n" +
+                "\n".join(pronostic_display) +
+                f"\n\n📊 Ce bot affiche {pct}% de chevaux placés sur les 30 derniers jours\n"
+                "🔞 Jeu responsable – Analyse automatisée"
             )
 
             send_telegram(message)
             sent.append(course_id)
-            save_json(SENT_FILE, sent)
+            save_sent(sent)
 
         except Exception as e:
             print("❌ Erreur course :", e)

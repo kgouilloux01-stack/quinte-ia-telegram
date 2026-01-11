@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import json
 import random
 import os
-import time
 
 # =====================
 # CONFIG TELEGRAM
@@ -15,7 +14,7 @@ CHANNEL_ID = -1003505856903
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SENT_FILE = "sent.json"
-RESULTS_FILE = "results.json"
+ARRIVEES_FILE = "arrivees.json"
 
 # =====================
 # TELEGRAM
@@ -30,27 +29,23 @@ def send_telegram(message):
     print("📨 Telegram status:", r.status_code)
 
 # =====================
-# LOAD / SAVE
+# FICHIERS
 # =====================
-def load_sent():
-    if os.path.exists(SENT_FILE):
-        with open(SENT_FILE, "r") as f:
+def load_json(file):
+    if os.path.exists(file):
+        with open(file, "r") as f:
             return json.load(f)
-    return []
+    return {}
 
-def save_sent(sent):
-    with open(SENT_FILE, "w") as f:
-        json.dump(sent, f)
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f)
 
-def load_results():
-    if os.path.exists(RESULTS_FILE):
-        with open(RESULTS_FILE, "r") as f:
-            return json.load(f)
-    return []
-
-def save_results(results):
-    with open(RESULTS_FILE, "w") as f:
-        json.dump(results, f)
+# =====================
+# NETTOYAGE NOM CHEVAUX
+# =====================
+def clean_nom(nom):
+    return ''.join(c for c in nom if c.isalpha() or c.isspace()).strip()
 
 # =====================
 # SCRAP DETAIL COURSE
@@ -59,7 +54,8 @@ def get_course_detail(link):
     if link.startswith("/"):
         link = "https://www.coin-turf.fr" + link
 
-    soup = BeautifulSoup(requests.get(link, headers=HEADERS).text, "html.parser")
+    resp = requests.get(link, headers=HEADERS, timeout=15)
+    soup = BeautifulSoup(resp.text, "html.parser")
 
     allocation = distance = partants = "N/A"
     info = soup.select_one("div.InfosCourse")
@@ -80,7 +76,7 @@ def get_course_detail(link):
             num = row.select_one("td:nth-child(1)").get_text(strip=True)
             nom_td = row.select_one("td:nth-child(2)")
             nom = " ".join(nom_td.stripped_strings) if nom_td else ""
-            nom_clean = ''.join(c for c in nom if c.isalpha() or c.isspace()).strip()
+            nom_clean = clean_nom(nom)
             if nom_clean:
                 chevaux.append(f"{num} – {nom_clean}")
         except:
@@ -88,63 +84,48 @@ def get_course_detail(link):
 
     # Arrivée officielle si disponible
     arrivee = []
-    h2 = soup.select_one("h2.titre_arrivee_officiel div")
-    if h2:
-        arrivee = [int(x.strip()) for x in h2.get_text().split("-") if x.strip().isdigit()]
+    h2_arr = soup.select_one("h2.titre_arrivee_officiel div")
+    if h2_arr:
+        arrivee = [x.strip() for x in h2_arr.get_text().split("-") if x.strip().isdigit()]
 
     return allocation, distance, partants, chevaux, arrivee
 
 # =====================
-# GENERER UN PRONOSTIC IA
+# GENERER PRONOSTIC IA
 # =====================
 def generate_ia(chevaux):
     if not chevaux:
-        return [], []
-
-    favori = chevaux[0]
-    tocard = chevaux[-1] if len(chevaux) > 1 else chevaux[0]
-    outsider = chevaux[len(chevaux)//2]
-
-    display = [
-        f"😎 {favori}",
-        f"🤔 {tocard}",
-        f"🥶 {outsider}"
-    ]
-
-    numbers = [
-        int(favori.split(" – ")[0]),
-        int(tocard.split(" – ")[0]),
-        int(outsider.split(" – ")[0])
-    ]
-
-    return display, numbers
+        return []
+    pronostic = random.sample(chevaux, min(3, len(chevaux)))
+    emojis = ["😎", "🤔", "🥶"]
+    return [f"{emojis[i]} {pronostic[i]}" for i in range(len(pronostic))]
 
 # =====================
 # CALCUL % CHEVAUX PLACES
 # =====================
-def update_statistics(prono_numbers, arrivee):
-    results = load_results()
-    for n in prono_numbers:
-        placed = 1 if n in arrivee[:3] else 0
-        results.append({"date": datetime.now().isoformat(), "placed": placed})
-    # Garder 30 derniers jours
-    cutoff = datetime.now() - timedelta(days=30)
-    results = [r for r in results if datetime.fromisoformat(r["date"]) > cutoff]
-    save_results(results)
-    if results:
-        pct = round(100 * sum(r["placed"] for r in results) / len(results))
-    else:
-        pct = 0
-    return pct
+def calcul_stats(sent, arrivees):
+    placed = 0
+    total = 0
+    for cid, pronos in sent.items():
+        if cid in arrivees:
+            total += 1
+            prono_nums = [p.split(" – ")[0] for p in pronos]
+            for num in prono_nums:
+                if num in arrivees[cid][:5]:  # top 5 = cheval placé
+                    placed += 1
+                    break
+    return round((placed / total * 100) if total else 0)
 
 # =====================
-# MAIN LOOP
+# MAIN
 # =====================
 def main():
-    sent = load_sent()
+    sent = load_json(SENT_FILE)
+    arrivees = load_json(ARRIVEES_FILE)
     now = datetime.now()
     print("🕒 Heure Paris :", now.strftime("%H:%M"))
 
+    print("🔎 Chargement de la page principale...")
     resp = requests.get(BASE_URL, headers=HEADERS, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
     rows = soup.find_all("tr", class_="clickable-row")
@@ -153,23 +134,43 @@ def main():
     for row in rows:
         try:
             course_id = row.get("id")
-            if not course_id or course_id in sent:
+            if not course_id:
                 continue
 
+            # Heure
+            heure_txt = row.select_one("td.td3").get_text(strip=True)
+            heure_course = datetime.strptime(heure_txt, "%Hh%M")
+            delta = (heure_course - now).total_seconds() / 60  # minutes
+
+            # On n'envoie que 10-15 min avant
+            if not (10 <= delta <= 15):
+                continue
+            if course_id in sent:
+                continue
+
+            # Numéro et nom de la course
             course_num = row.select_one("td.td1").get_text(strip=True)
             course_name = row.select_one("td.td2 div.TdTitre").get_text(strip=True)
+
+            # Hippodrome
             link = row.get("data-href")
             hipp_name = "N/A"
             if link and "_" in link:
                 hipp_name = link.split("_")[1].split("/")[0].capitalize()
-            heure_txt = row.select_one("td.td3").get_text(strip=True)
 
+            # Détails course
             allocation, distance, partants, chevaux, arrivee = get_course_detail(link)
             if not chevaux:
                 continue
 
-            pronostic_display, pronostic_numbers = generate_ia(chevaux)
-            pct = update_statistics(pronostic_numbers, arrivee)
+            # Pronostic IA
+            pronostic = generate_ia(chevaux)
+
+            # Enregistrement pour stats
+            sent[course_id] = [p.split(" – ")[1] for p in pronostic]
+
+            # Calcul stats
+            percent = calcul_stats(sent, arrivees)
 
             message = (
                 f"🤖 LECTURE MACHINE – JEUX SIMPLE G/P\n\n"
@@ -179,15 +180,14 @@ def main():
                 f"💰 Allocation : {allocation}\n"
                 f"📏 Distance : {distance}\n"
                 f"👥 Partants : {partants}\n\n"
-                f"👉 Pronostic IA\n" +
-                "\n".join(pronostic_display) +
-                f"\n\n📊 Ce bot affiche {pct}% de chevaux placés sur les 30 derniers jours\n"
-                "🔞 Jeu responsable – Analyse automatisée"
+                "👉 Pronostic IA\n" +
+                "\n".join(pronostic) +
+                f"\n\n📊 Ce bot affiche {percent}% de chevaux placés sur les 30 derniers jours"
+                "\n🔞 Jeu responsable – Analyse automatisée"
             )
 
             send_telegram(message)
-            sent.append(course_id)
-            save_sent(sent)
+            save_json(SENT_FILE, sent)
 
         except Exception as e:
             print("❌ Erreur course :", e)

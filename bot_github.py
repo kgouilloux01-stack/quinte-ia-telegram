@@ -45,11 +45,15 @@ def save_sent(sent):
 
 def git_commit_sent():
     try:
-        subprocess.run(["git", "config", "--local", "user.email", "action@github.com"], check=True)
-        subprocess.run(["git", "config", "--local", "user.name", "GitHub Action"], check=True)
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
         subprocess.run(["git", "add", SENT_FILE], check=True)
         subprocess.run(["git", "commit", "-m", "Update sent.json after sending pronostic"], check=True)
-        subprocess.run(["git", "push"], check=True)
+        repo = os.environ["GITHUB_REPOSITORY"]
+        token = os.environ["GITHUB_TOKEN"]
+        subprocess.run([
+            "git", "push", f"https://x-access-token:{token}@github.com/{repo}.git"
+        ], check=True)
         print("✅ sent.json commité et pushé")
     except subprocess.CalledProcessError as e:
         print("❌ Erreur git :", e)

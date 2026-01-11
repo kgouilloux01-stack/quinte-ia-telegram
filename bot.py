@@ -1,7 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import random
 
 # =====================
 # CONFIG TELEGRAM
@@ -11,7 +12,6 @@ CHANNEL_ID = -1003505856903
 
 BASE_URL = "https://www.coin-turf.fr/programmes-courses/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
-
 PARIS_TZ = ZoneInfo("Europe/Paris")
 
 # =====================
@@ -47,13 +47,35 @@ def get_course_detail(url):
     chevaux = []
     for row in soup.select(".TablePartantDesk tbody tr"):
         try:
-            numero = row.select_one("td:nth-child(1)").get_text(strip=True)
             nom = row.select_one("td:nth-child(2)").get_text(strip=True)
-            chevaux.append(f"{numero} – {nom}")
+            chevaux.append(nom)
         except:
             continue
 
     return allocation, distance, partants, chevaux
+
+# =====================
+# GÉNÉRER PRONOSTIC IA
+# =====================
+def generate_prono(chevaux):
+    if not chevaux:
+        return []
+
+    pronostic = []
+    # Shuffle pour simuler IA
+    random.shuffle(chevaux)
+    top3 = chevaux[:3]
+
+    for i, cheval in enumerate(top3):
+        # Emoji selon position (exemple simple)
+        if i == 0:
+            emoji = "😎"  # favori
+        elif i == 1:
+            emoji = "🤔"  # outsider
+        else:
+            emoji = "🥶"  # tocard
+        pronostic.append(f"{emoji} {cheval}")
+    return pronostic
 
 # =====================
 # MAIN
@@ -64,7 +86,6 @@ def main():
 
     print("🔎 Chargement de la page principale...")
     soup = BeautifulSoup(requests.get(BASE_URL, headers=HEADERS).text, "html.parser")
-
     rows = soup.select("tr.clickable-row")
     if not rows:
         print("❌ Aucune course trouvée")
@@ -75,25 +96,32 @@ def main():
             reunion = row.select_one("td.td1").get_text(strip=True)
             nom = row.select_one("td.td2 > div.TdTitre").get_text(strip=True)
             heure_txt = row.select_one("td.td3").get_text(strip=True)
-            hippodrome = row["data-href"].split("/")[2]  # exemple: /09012026/177245_vincennes/prix-de-saint-flour
             link = "https://www.coin-turf.fr" + row["data-href"]
+
+            # Calculer delta minutes
+            race_time = datetime.strptime(heure_txt, "%Hh%M").replace(
+                year=now.year, month=now.month, day=now.day, tzinfo=PARIS_TZ
+            )
+            delta = (race_time - now).total_seconds() / 60
+
+            # 🎯 Envoyer seulement 10–15 min avant la course
+            if not (60 <= delta <= 300):
+                continue
 
             allocation, distance, partants, chevaux = get_course_detail(link)
 
-            # 🔮 Top 3 chevaux IA (test)
-            prono = chevaux[:3] if len(chevaux) >= 3 else chevaux
+            pronostic = generate_prono(chevaux)
 
             message = (
-                "🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
+                f"🤖 **LECTURE MACHINE – QUINTÉ DU JOUR**\n\n"
                 f"📍 **{nom}**\n"
-                f"🏟 {hippodrome}\n"
-                f"📌 Réunion : {reunion}\n"
-                f"⏰ Départ : {heure_txt} (heure FR)\n"
+                f"🏟 {reunion}\n"
+                f"⏰ Départ : {heure_txt}\n"
                 f"💰 Allocation : {allocation}\n"
                 f"📏 Distance : {distance}\n"
                 f"👥 Partants : {partants}\n\n"
-                "👉 **Pronostic IA (test)**\n"
-                + "\n".join(prono) +
+                "👉 **Pronostic IA**\n"
+                + "\n".join(pronostic) +
                 "\n\n🔞 Jeu responsable – Analyse automatisée"
             )
 

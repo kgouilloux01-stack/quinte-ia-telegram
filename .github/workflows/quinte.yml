@@ -2,7 +2,7 @@ name: Quinté Bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # toutes les 5 minutes
+    
   workflow_dispatch:
 
 jobs:
